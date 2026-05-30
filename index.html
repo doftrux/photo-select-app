@@ -9,10 +9,10 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <!-- EXIF 정보 및 RAW 파싱 라이브러리 -->
     <script src="https://cdn.jsdelivr.net/npm/exifr/dist/full.umd.js"></script>
+    <!-- WebRTC P2P 통신 라이브러리 (서버 없는 1:1 직접 연결) -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <!-- QR 코드 생성 라이브러리 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-    <!-- AES-256 종단간 암호화 라이브러리 (보안 강화) -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
     <style>
         body {
             background-color: #121212;
@@ -27,42 +27,24 @@
             height: 100%;
             overflow: hidden;
             cursor: grab;
-            touch-action: none; /* 모바일 드래그 시 브라우저 스크롤 간섭 방지 */
+            touch-action: none;
         }
         
-        #image-wrapper {
-            display: block; 
-        }
-
-        #image-wrapper.loupe-active {
-            cursor: none !important;
-        }
-
-        #image-wrapper:active, #ref-wrapper:active {
-            cursor: grabbing;
-        }
+        #image-wrapper { display: block; }
+        #image-wrapper.loupe-active { cursor: none !important; }
+        #image-wrapper:active, #ref-wrapper:active { cursor: grabbing; }
 
         /* 렌더링 최적화: 절대 좌표 중앙 배치 후 Transform 제어 */
         #main-image, #nav-img, #loupe-img, #ref-image {
-            position: absolute;
-            left: 50%;
-            top: 50%;
-            max-width: none;
-            max-height: none;
-            transform-origin: center center;
-            will-change: transform;
-            pointer-events: none;
+            position: absolute; left: 50%; top: 50%;
+            max-width: none; max-height: none;
+            transform-origin: center center; will-change: transform; pointer-events: none;
         }
         
-        .smooth-transform {
-            transition: transform 0.15s cubic-bezier(0.2, 0.8, 0.2, 1);
-        }
+        .smooth-transform { transition: transform 0.15s cubic-bezier(0.2, 0.8, 0.2, 1); }
+        .dragging #main-image, .dragging #ref-image { transition: none !important; }
         
-        .dragging #main-image, .dragging #ref-image {
-            transition: none !important;
-        }
-        
-        /* 네비게이션 창 (미니맵) */
+        /* 네비게이션 창 */
         #navigator-panel {
             position: absolute; right: 20px; top: 20px; width: 240px; background: rgba(17, 24, 39, 0.9);
             border: 1px solid #374151; border-radius: 8px; overflow: hidden; z-index: 40;
@@ -75,8 +57,7 @@
         #loupe {
             position: absolute; width: 250px; height: 250px; border-radius: 50%;
             border: 3px solid rgba(255, 255, 255, 0.8); box-shadow: 0 0 15px rgba(0,0,0,0.5);
-            background-repeat: no-repeat; pointer-events: none; display: none; z-index: 50;
-            background-color: #1a1a1a; overflow: hidden;
+            background-repeat: no-repeat; pointer-events: none; display: none; z-index: 50; background-color: #1a1a1a; overflow: hidden;
         }
 
         .star-btn, .label-btn { transition: all 0.2s; }
@@ -91,24 +72,6 @@
         .label-purple { background-color: #a855f7; }
         .label-none { background-color: transparent; border: 1px solid #4b5563; }
         .label-active { border: 3px solid white; box-shadow: 0 0 10px rgba(255,255,255,0.5); }
-
-        .disabled-meta {
-            filter: grayscale(100%);
-            opacity: 0.3;
-            pointer-events: none;
-        }
-        .disabled-meta::after {
-            content: '';
-            position: absolute;
-            top: 50%;
-            left: -5%;
-            width: 110%;
-            height: 2px;
-            background-color: #ef4444;
-            transform: translateY(-50%);
-            pointer-events: none;
-            z-index: 10;
-        }
 
         #toast {
             position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
@@ -127,7 +90,7 @@
         
         .file-list-item.active { background-color: #2563eb; color: white; }
 
-        /* 전체화면 툴바 숨김 및 호버 표시 애니메이션 수정 */
+        /* 전체화면 툴바 숨김 및 호버 표시 애니메이션 */
         .fullscreen-mode header { transform: translateY(-100%); transition: transform 0.3s, opacity 0.3s; position: absolute; top: 0; width: 100%; z-index: 50; pointer-events: none; opacity: 0; }
         .fullscreen-mode footer { transform: translateY(100%); transition: transform 0.3s, opacity 0.3s; position: absolute; bottom: 0; width: 100%; z-index: 50; pointer-events: none; opacity: 0; }
         .fullscreen-mode aside { transform: translateX(100%); transition: transform 0.3s, opacity 0.3s; position: absolute; right: 0; height: 100%; z-index: 40; pointer-events: none; opacity: 0; }
@@ -137,7 +100,6 @@
         .fullscreen-mode.show-footer footer { transform: translateY(0); pointer-events: auto; opacity: 1; }
         .fullscreen-mode.show-sidebar aside { transform: translateX(0); pointer-events: auto; opacity: 1; }
 
-        /* 가로 스크롤바 숨기기 (반응형 UI용) */
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
@@ -147,12 +109,10 @@
     <!-- 상단 툴바 -->
     <header id="top-toolbar" class="flex flex-nowrap items-center justify-between px-2 sm:px-4 py-1.5 sm:py-2 bg-gray-900 border-b border-gray-800 h-[50px] sm:h-[64px] shrink-0 z-30 relative shadow-md overflow-hidden gap-1 sm:gap-4 w-full cursor-grab active:cursor-grabbing">
         <div class="flex items-center space-x-1 sm:space-x-2 shrink-0 min-w-0">
-            <!-- 타이틀 및 현재 폴더 이름 표시 영역 -->
             <h1 id="header-title" class="text-xs sm:text-xl font-bold tracking-tight text-white truncate max-w-[60px] sm:max-w-xs shrink-0">📸 Photo HI</h1>
             
             <!-- 셀렉 통계 대시보드 -->
             <div id="stat-dashboard" class="hidden md:flex items-center space-x-3 lg:space-x-5 bg-gray-800 px-3 lg:px-4 py-1.5 rounded-xl border border-gray-700 shadow-inner shrink-0 transition-opacity duration-300">
-                <!-- 진행률 -->
                 <div class="flex flex-col w-28 lg:w-36" title="전체 사진 중 열람한 사진의 비율">
                     <div class="flex justify-between text-[10px] text-gray-400 font-medium mb-1">
                         <span class="flex items-center"><svg class="w-3 h-3 mr-1 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>열람 진행률</span>
@@ -163,7 +123,6 @@
                     </div>
                 </div>
                 
-                <!-- 셀렉률 -->
                 <div class="flex flex-col w-28 lg:w-36" title="전체 사진 중 셀렉된 사진의 비율">
                     <div class="flex justify-between text-[10px] text-gray-400 font-medium mb-1">
                         <span class="flex items-center"><svg class="w-3 h-3 mr-1 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>셀렉률 (<span id="stat-select-count" class="text-white mx-0.5 font-bold">0</span>장)</span>
@@ -174,7 +133,6 @@
                     </div>
                 </div>
 
-                <!-- 예상 셀렉 수 -->
                 <div class="flex flex-col items-center justify-center pl-4 border-l border-gray-600/50" title="현재 셀렉 패턴을 바탕으로 한 최종 예상 셀렉 수">
                     <span class="text-[10px] text-gray-400 font-medium flex items-center"><svg class="w-3 h-3 mr-1 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>예상 셀렉</span>
                     <div class="flex items-baseline mt-0.5">
@@ -183,8 +141,7 @@
                     </div>
                 </div>
 
-                <!-- 촬영 정보 (EXIF) -->
-                <div class="hidden xl:flex flex-col items-start justify-center pl-4 border-l border-gray-600/50" title="현재 사진 촬영 정보 (조리개, 셔터속도, ISO, 화각, 플래시)">
+                <div class="hidden xl:flex flex-col items-start justify-center pl-4 border-l border-gray-600/50" title="현재 사진 촬영 정보">
                     <span class="text-[10px] text-gray-400 font-medium flex items-center"><svg class="w-3 h-3 mr-1 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>촬영 정보</span>
                     <div class="flex items-baseline mt-0.5">
                         <span id="stat-exif" class="text-[11px] font-bold text-purple-300 leading-none font-mono tracking-tight">-</span>
@@ -194,16 +151,15 @@
         </div>
         
         <div class="flex flex-nowrap items-center gap-1 sm:gap-2 shrink-0 ml-auto justify-end">
-            <!-- 모바일 리모컨 버튼 추가 -->
-            <button id="btn-remote-mode" class="p-1 sm:px-3 sm:py-1.5 text-[10px] sm:text-sm font-medium text-emerald-400 border border-emerald-600/50 bg-emerald-900/20 rounded hover:bg-emerald-900/40 transition-colors flex items-center shrink-0" title="안전한 블라인드 리모컨 연결">
-                <svg class="w-4 h-4 sm:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
-                <span class="hidden sm:inline">보안 리모컨</span>
+            <!-- 모바일 연동 (보안 강화 WebRTC) -->
+            <button id="btn-remote-mode" class="p-1 sm:px-3 sm:py-1.5 text-[10px] sm:text-sm font-medium text-blue-400 border border-blue-600/50 bg-blue-900/20 rounded hover:bg-blue-900/40 transition-colors flex items-center shrink-0" title="스마트폰에 사진 띄우기 (서버에 저장되지 않음)">
+                <svg class="w-4 h-4 sm:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+                <span class="hidden sm:inline">모바일 연동</span>
             </button>
             <div class="w-px h-5 bg-gray-700 hidden sm:block mx-1"></div>
 
-            <div class="flex items-center space-x-1 sm:space-x-2 bg-gray-800 p-1 sm:px-3 sm:py-1.5 rounded border border-gray-700 shrink-0" title="배경색 변경">
+            <div class="flex items-center space-x-1 sm:space-x-2 bg-gray-800 p-1 sm:px-3 sm:py-1.5 rounded border border-gray-700 shrink-0">
                 <span class="text-xs text-gray-400 mr-1 hidden lg:inline">배경</span>
-                <!-- 모바일에서는 공간 확보 위해 텍스트 숨김 -->
                 <div class="hidden sm:flex items-center space-x-1">
                     <button class="w-4 h-4 rounded-full bg-black border border-gray-600 hover:scale-125 transition-transform" data-bg="#000000" title="검은색"></button>
                     <button class="w-4 h-4 rounded-full bg-[#222222] border border-gray-500 hover:scale-125 transition-transform" data-bg="#222222" title="짙은 회색"></button>
@@ -241,13 +197,11 @@
     <div class="flex flex-1 relative overflow-hidden">
         
         <main id="main-area" class="flex-1 relative p-4 transition-colors overflow-hidden" style="background-color: #000000;">
-            <!-- 통합 및 최적화된 Drop Zone UI -->
             <div id="drop-zone" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-11/12 max-w-2xl border-2 border-dashed border-white/40 rounded-2xl flex flex-col items-center justify-center py-16 px-4 text-gray-400 transition-all duration-200 hover:border-white/80 hover:text-white z-20 bg-black/80 backdrop-blur-sm shadow-2xl">
                 <svg class="w-16 h-16 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
                 <p class="text-2xl font-bold text-white mb-2 text-center" id="drop-msg">이미지, 폴더, ZIP 파일을 이곳에 드롭하세요</p>
                 <p class="text-sm text-center mb-8">모든 RAW 포맷(CR3, RAF 등) 지원 / EXIF 자동 회전</p>
                 
-                <!-- 통합된 2버튼 구조 -->
                 <div class="flex space-x-4">
                     <button id="btn-main-open-folder" class="px-6 py-3 text-sm font-bold text-white bg-blue-600 rounded-lg hover:bg-blue-500 shadow-lg transition-transform hover:scale-105 focus:outline-none flex items-center">
                         <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
@@ -268,24 +222,18 @@
 
             <!-- 스플릿 뷰 컨테이너 -->
             <div id="viewer-container" class="absolute inset-0 z-10 flex" style="display: none;">
-                <!-- 왼쪽: 비교 뷰어 (스플릿 뷰, 기본 숨김) -->
                 <div id="ref-wrapper" class="relative flex-1 border-r border-gray-700 hidden overflow-hidden cursor-grab bg-black/50 transition-all">
-
                     <img id="ref-image" class="smooth-transform absolute left-1/2 top-1/2 max-w-none max-h-none origin-center pointer-events-none hidden" src="" alt="">
-                    <!-- 비교 이미지 없음 안내 메시지 -->
                     <div id="ref-empty-msg" class="absolute inset-0 flex flex-col items-center justify-center text-gray-500 pointer-events-none text-sm font-bold space-y-3 p-4 text-center">
                         <svg class="w-12 h-12 text-gray-600 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2"></path></svg>
                         <span>[비교 모드]<br>우측 파일 목록에서 사진을 이 영역으로<br>드래그 앤 드롭 하세요</span>
                     </div>
-                    <!-- 파일 드래그 오버레이 -->
                     <div id="ref-drop-overlay" class="absolute inset-0 flex items-center justify-center bg-blue-500/30 text-white font-bold opacity-0 transition-opacity pointer-events-none z-20 border-4 border-blue-500 border-dashed m-3 rounded-xl backdrop-blur-sm text-lg">
                         여기에 사진 놓기
                     </div>
                 </div>
                 
-                <!-- 오른쪽: 메인 뷰어 (항상 표시, 기본적으로 전체 화면 차지) -->
                 <div id="image-wrapper" class="relative flex-1 overflow-hidden cursor-grab block transition-all">
-
                     <img id="main-image" class="smooth-transform absolute left-1/2 top-1/2 max-w-none max-h-none origin-center pointer-events-none" src="" alt="">
                     <div id="loupe">
                         <img id="loupe-img" src="">
@@ -293,7 +241,6 @@
                 </div>
             </div>
             
-            <!-- 내비게이터(미니맵) -->
             <div id="navigator-panel">
                 <div id="nav-header" class="flex justify-between items-center px-3 py-1.5 bg-gray-800 border-b border-gray-700">
                     <span class="text-xs font-bold text-gray-300">네비게이션 (<span id="tip-nav">N</span>)</span>
@@ -316,7 +263,6 @@
         <!-- 오른쪽 목록 사이드바 -->
         <aside id="sidebar" class="w-72 max-w-[85vw] bg-gray-900 border-l border-gray-800 flex flex-col shrink-0 z-40 absolute md:relative right-0 h-full transition-transform duration-300 shadow-2xl md:shadow-none">
             <div class="p-3 border-b border-gray-800 bg-gray-900 shadow-sm z-10 flex flex-col space-y-3">
-                <!-- 파일 목록 헤더와 아이콘 버튼들을 같은 줄 정렬 -->
                 <div class="flex items-center justify-between w-full">
                     <div class="flex items-center space-x-2">
                         <h3 class="text-sm font-bold text-white">파일 목록</h3>
@@ -333,7 +279,6 @@
                     </div>
                 </div>
 
-                <!-- 직관적인 전체 선택, TXT, XMP 저장 UI -->
                 <div class="flex space-x-2 mt-1 w-full">
                     <label class="flex-1 flex items-center justify-center space-x-1.5 cursor-pointer bg-gray-700 hover:bg-gray-600 px-2 py-2 rounded-md border border-gray-600 transition shadow-inner" title="전체 선택 / 해제">
                         <input type="checkbox" id="chk-select-all" class="w-4 h-4 rounded border-gray-500 bg-gray-800 cursor-pointer accent-blue-500">
@@ -355,7 +300,6 @@
                     </div>
                 </div>
 
-                <!-- 필터 영역 -->
                 <div class="flex space-x-1.5 z-10 relative">
                     <select id="filter-rating" class="flex-1 min-w-0 bg-gray-800 text-gray-300 text-xs px-1 py-1.5 rounded border border-gray-700 outline-none">
                         <option value="all">모든 등급</option>
@@ -380,11 +324,9 @@
 
     <!-- 하단 툴바 -->
     <footer id="bottom-toolbar" class="flex flex-nowrap items-center justify-between px-1.5 sm:px-6 py-1 sm:py-2 bg-gray-900 border-t border-gray-800 h-[50px] sm:h-[60px] shrink-0 z-30 relative overflow-hidden gap-1 sm:gap-4 w-full cursor-grab active:cursor-grabbing">
-        <!-- 1그룹: 파일명 및 보기 설정 -->
         <div class="flex items-center gap-1 sm:gap-2 shrink-0 min-w-0">
             <span id="file-name" class="hidden md:block font-mono text-sm text-gray-300 truncate max-w-[150px] shrink-0">파일 없음</span>
             
-            <!-- 보기 모드 / 줌 선택 -->
             <select id="zoom-select" class="bg-gray-800 text-gray-300 text-[10px] sm:text-xs px-1 sm:px-2 py-1 sm:py-1.5 rounded border border-gray-700 shrink-0 outline-none w-[60px] sm:w-auto">
                 <optgroup label="보기 모드">
                     <option value="fit" selected>화면 맞춤</option>
@@ -399,7 +341,6 @@
                 </optgroup>
             </select>
             
-            <!-- 회전/반전 버튼 그룹 및 EXIF 토글 -->
             <div class="flex items-center bg-gray-800 rounded border border-gray-700 shrink-0">
                 <button id="btn-toggle-exif" class="px-1.5 sm:px-2 py-1 sm:py-1.5 text-[9px] sm:text-xs font-bold text-blue-400 hover:text-blue-300 transition" title="RAW 자동 회전 (EXIF 적용)">
                     EXIF<span class="hidden sm:inline"> ON</span>
@@ -421,7 +362,6 @@
             </div>
         </div>
 
-        <!-- 2그룹: 메타데이터 지정 -->
         <div class="flex items-center justify-center space-x-1 sm:space-x-4 px-1 sm:px-2 shrink-0 mx-auto">
             <div class="flex items-center justify-center space-x-0 sm:space-x-1 relative" id="rating-container"></div>
             <div class="w-px h-4 sm:h-6 bg-gray-700 hidden sm:block"></div>
@@ -435,7 +375,6 @@
             </div>
         </div>
 
-        <!-- 3그룹: 액션 버튼 -->
         <div class="flex items-center justify-end gap-1 sm:gap-2 shrink-0 ml-auto">
             <button id="btn-open-dest" class="p-1 sm:px-3 sm:py-1.5 text-[10px] sm:text-sm font-medium text-gray-300 bg-gray-700 rounded hover:bg-gray-600 focus:outline-none flex items-center shrink-0" title="셀렉 폴더 설정" disabled>
                 <svg class="w-4 h-4 sm:mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z"></path></svg>
@@ -462,7 +401,6 @@
             <div class="space-y-1 text-sm text-gray-300 overflow-y-auto custom-scrollbar pr-2 flex-1" id="shortcuts-list">
             </div>
             
-            <!-- 저장소(캐시) 관리 섹션 -->
             <div class="mt-4 pt-4 border-t border-gray-700 shrink-0">
                 <div class="flex justify-between items-center mb-1.5">
                     <span class="text-sm font-bold text-gray-300">앱 캐시 용량 관리</span>
@@ -484,10 +422,9 @@
     <!-- 모바일 리모컨 QR 모달 -->
     <div id="qr-modal" class="fixed inset-0 z-50 items-center justify-center hidden">
         <div class="bg-gray-800 border border-gray-700 rounded-lg p-6 max-w-sm w-full shadow-2xl flex flex-col items-center">
-            <h2 class="text-xl font-bold text-white mb-2">보안 리모컨 연결</h2>
-            <!-- 종단간 암호화(E2EE) 배지 제거 및 사진 유출 없음 강조 -->
+            <h2 class="text-xl font-bold text-white mb-2">스마트폰 연동</h2>
             <div class="text-emerald-400 text-xs font-bold mb-4 bg-emerald-900/30 px-3 py-1.5 rounded border border-emerald-800 text-center">
-                보안 모드 작동: 모바일로 사진을 보내지 않습니다.
+                보안 안내: 서버 저장 없이 기기 간 P2P로 직접 전송됩니다.
             </div>
             <div id="qrcode-container" class="bg-white p-3 rounded-lg mb-4"></div>
             <p class="text-sm text-gray-300 text-center mb-6" id="qr-info-text">스마트폰 카메라로 위 QR 코드를 스캔하세요.<br>이 창을 닫아도 연결은 유지됩니다.</p>
@@ -496,73 +433,78 @@
     </div>
 
     <!-- 모바일 전용 리모컨 UI (PC에서는 숨김) -->
-    <div id="remote-view" class="hidden fixed inset-0 z-[99999] bg-[#121212] flex-col h-full w-full overflow-hidden select-none text-white">
+    <div id="remote-view" class="hidden fixed inset-0 z-[99999] bg-[#000] flex-col h-full w-full overflow-hidden select-none text-white">
         <!-- Top Nav -->
-        <div id="remote-top-bar" class="flex items-center justify-between p-4 bg-gray-900 border-b border-gray-800 shrink-0">
-            <div class="flex items-center text-emerald-400 text-sm font-bold">
-                <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
-                보안 연결됨
+        <div id="remote-top-bar" class="flex items-center justify-between p-3 bg-gray-900/90 absolute top-0 left-0 w-full z-50 transition-transform duration-300">
+            <button id="btn-remote-list" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-bold shrink-0">☰ 목록</button>
+            <div class="text-center font-bold text-xs sm:text-sm truncate px-2 flex-1 text-emerald-400" id="remote-filename">연결 중...</div>
+            <div class="flex items-center space-x-1 shrink-0">
+                <button id="btn-remote-help" class="flex items-center justify-center w-6 h-6 bg-gray-700 hover:bg-gray-600 rounded-full text-xs font-bold transition-colors mr-1">?</button>
+                <button id="btn-remote-fit" class="px-2 py-1.5 bg-blue-600 rounded text-[10px] font-bold transition-colors">화면맞춤</button>
+                <button id="btn-remote-width" class="px-2 py-1.5 bg-gray-700 rounded text-[10px] font-bold transition-colors">폭맞춤</button>
             </div>
-            <div class="text-center font-mono text-sm px-2 text-gray-300" id="remote-filename">대기 중...</div>
-            <button id="btn-remote-help" class="w-8 h-8 flex items-center justify-center bg-gray-800 hover:bg-gray-700 rounded-full text-sm font-bold border border-gray-700 transition-colors">?</button>
         </div>
 
-        <!-- Blind Trackpad Area -->
-        <div id="remote-img-container" class="flex-1 w-full relative overflow-hidden flex flex-col items-center justify-center touch-none bg-black cursor-pointer">
-            <svg class="w-16 h-16 text-gray-700 mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path></svg>
-            <div class="text-gray-500 font-bold text-lg mb-2">리모컨 트랙패드</div>
-            <div class="text-gray-600 text-sm text-center px-6">
-                이곳을 좌우로 스와이프하여 사진을 넘기세요.<br>
-                <span class="text-xs mt-2 block text-emerald-500">안전을 위해 모바일에 사진이 출력되지 않습니다.</span>
-            </div>
-            <!-- 스와이프 이펙트 오버레이 -->
+        <!-- Image Area (제스처 동작 영역) -->
+        <div id="remote-img-container" class="flex-1 w-full h-full relative overflow-hidden flex items-center justify-center touch-none">
+            <img id="remote-img" class="absolute left-1/2 top-1/2 pointer-events-none" style="transform: translate(-50%, -50%) scale(1); max-width: none; max-height: none;" src="" alt="" />
             <div id="remote-swipe-overlay" class="absolute inset-0 z-10 flex items-center justify-center opacity-0 transition-opacity pointer-events-none">
-                <span class="bg-gray-800/80 text-white px-6 py-3 rounded-2xl font-bold text-2xl backdrop-blur-sm border border-gray-600 shadow-2xl"></span>
+                <span class="bg-black/50 text-white px-6 py-3 rounded-2xl font-bold text-2xl backdrop-blur-sm border border-gray-600 shadow-2xl"></span>
             </div>
         </div>
 
-        <!-- Metadata Controls -->
-        <div class="bg-gray-900 p-4 shrink-0 flex flex-col space-y-4 border-t border-gray-800">
-            <!-- Stars -->
-            <div class="flex justify-between items-center bg-gray-800 rounded-xl p-2 border border-gray-700">
-                <button class="remote-star-btn w-12 h-12 flex items-center justify-center rounded-lg text-gray-500 active:bg-gray-700 transition" data-val="1"><svg class="w-8 h-8" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path></svg></button>
-                <button class="remote-star-btn w-12 h-12 flex items-center justify-center rounded-lg text-gray-500 active:bg-gray-700 transition" data-val="2"><svg class="w-8 h-8" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path></svg></button>
-                <button class="remote-star-btn w-12 h-12 flex items-center justify-center rounded-lg text-gray-500 active:bg-gray-700 transition" data-val="3"><svg class="w-8 h-8" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path></svg></button>
-                <button class="remote-star-btn w-12 h-12 flex items-center justify-center rounded-lg text-gray-500 active:bg-gray-700 transition" data-val="4"><svg class="w-8 h-8" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path></svg></button>
-                <button class="remote-star-btn w-12 h-12 flex items-center justify-center rounded-lg text-gray-500 active:bg-gray-700 transition" data-val="5"><svg class="w-8 h-8" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path></svg></button>
-                <button class="remote-star-btn w-12 h-12 flex items-center justify-center rounded-lg text-gray-500 active:bg-gray-700 transition" data-val="0"><span class="font-bold text-xl">X</span></button>
+        <!-- Bottom Bar -->
+        <div id="remote-bottom-bar" class="flex flex-col w-full bg-gray-900/95 absolute bottom-0 left-0 z-50 transition-transform duration-300">
+            <!-- 메타데이터 컨트롤 -->
+            <div class="flex w-full p-2 space-x-2 border-b border-gray-800">
+                <div class="flex justify-between items-center bg-gray-800 rounded-lg p-1.5 border border-gray-700 flex-1">
+                    <button class="remote-star-btn w-8 h-8 flex items-center justify-center rounded text-gray-500 active:bg-gray-700 transition" data-val="1"><svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path></svg></button>
+                    <button class="remote-star-btn w-8 h-8 flex items-center justify-center rounded text-gray-500 active:bg-gray-700 transition" data-val="2"><svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path></svg></button>
+                    <button class="remote-star-btn w-8 h-8 flex items-center justify-center rounded text-gray-500 active:bg-gray-700 transition" data-val="3"><svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path></svg></button>
+                    <button class="remote-star-btn w-8 h-8 flex items-center justify-center rounded text-gray-500 active:bg-gray-700 transition" data-val="4"><svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path></svg></button>
+                    <button class="remote-star-btn w-8 h-8 flex items-center justify-center rounded text-gray-500 active:bg-gray-700 transition" data-val="5"><svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path></svg></button>
+                    <button class="remote-star-btn w-8 h-8 flex items-center justify-center rounded text-gray-500 active:bg-gray-700 transition" data-val="0"><span class="font-bold text-sm">X</span></button>
+                </div>
+                <div class="flex justify-between items-center bg-gray-800 rounded-lg p-1.5 border border-gray-700 flex-1">
+                    <button class="remote-label-btn w-6 h-6 rounded-full bg-red-500 shadow-md border-2 border-transparent active:border-white transition" data-val="Red"></button>
+                    <button class="remote-label-btn w-6 h-6 rounded-full bg-yellow-500 shadow-md border-2 border-transparent active:border-white transition" data-val="Yellow"></button>
+                    <button class="remote-label-btn w-6 h-6 rounded-full bg-green-500 shadow-md border-2 border-transparent active:border-white transition" data-val="Green"></button>
+                    <button class="remote-label-btn w-6 h-6 rounded-full bg-blue-500 shadow-md border-2 border-transparent active:border-white transition" data-val="Blue"></button>
+                    <button class="remote-label-btn w-6 h-6 rounded-full bg-purple-500 shadow-md border-2 border-transparent active:border-white transition" data-val="Purple"></button>
+                </div>
             </div>
             
-            <!-- Labels -->
-            <div class="flex justify-between items-center bg-gray-800 rounded-xl p-3 border border-gray-700">
-                <button class="remote-label-btn w-10 h-10 rounded-full bg-red-500 shadow-md border-2 border-transparent active:border-white transition" data-val="Red"></button>
-                <button class="remote-label-btn w-10 h-10 rounded-full bg-yellow-500 shadow-md border-2 border-transparent active:border-white transition" data-val="Yellow"></button>
-                <button class="remote-label-btn w-10 h-10 rounded-full bg-green-500 shadow-md border-2 border-transparent active:border-white transition" data-val="Green"></button>
-                <button class="remote-label-btn w-10 h-10 rounded-full bg-blue-500 shadow-md border-2 border-transparent active:border-white transition" data-val="Blue"></button>
-                <button class="remote-label-btn w-10 h-10 rounded-full bg-purple-500 shadow-md border-2 border-transparent active:border-white transition" data-val="Purple"></button>
+            <div class="flex w-full space-x-2 p-3">
+                <button id="btn-remote-prev" class="flex-1 bg-gray-800 active:bg-gray-700 border border-gray-700 text-white rounded-xl py-3 text-sm font-bold flex justify-center items-center transition-colors">
+                    <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg> 이전
+                </button>
+                <button id="btn-remote-next" class="flex-1 bg-blue-700 active:bg-blue-600 border border-blue-600 text-white rounded-xl py-3 text-sm font-bold flex justify-center items-center transition-colors">
+                    다음 <svg class="w-5 h-5 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                </button>
             </div>
         </div>
 
-        <!-- Bottom Bar (Nav) -->
-        <div id="remote-bottom-bar" class="flex w-full space-x-3 p-4 bg-black shrink-0">
-            <button id="btn-remote-prev" class="flex-1 bg-gray-800 active:bg-gray-700 border border-gray-700 text-white rounded-2xl py-4 text-base font-bold flex justify-center items-center transition-colors shadow-lg">
-                <svg class="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg> 이전
-            </button>
-            <button id="btn-remote-next" class="flex-1 bg-blue-600 active:bg-blue-500 border border-blue-500 text-white rounded-2xl py-4 text-base font-bold flex justify-center items-center transition-colors shadow-lg">
-                다음 <svg class="w-6 h-6 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
-            </button>
+        <!-- File List Modal -->
+        <div id="remote-list-overlay" class="hidden absolute inset-0 bg-gray-900 z-[100] flex-col">
+            <div class="flex justify-between items-center p-3 bg-gray-800 border-b border-gray-700 shrink-0">
+                <h3 class="font-bold text-sm">파일 목록 (<span id="remote-list-count">0</span>)</h3>
+                <button id="btn-remote-list-close" class="text-gray-300 px-3 py-1 bg-gray-700 rounded text-xs font-bold">닫기</button>
+            </div>
+            <ul id="remote-file-list" class="flex-1 overflow-y-auto p-2 space-y-1"></ul>
         </div>
         
         <!-- Help (Manual) Modal -->
-        <div id="remote-help-overlay" class="hidden absolute inset-0 bg-black/95 z-[110] flex-col p-6 items-center justify-center">
-            <div class="bg-gray-800 rounded-2xl p-6 w-full max-w-sm shadow-2xl border border-gray-700">
-                <h3 class="text-xl font-bold mb-6 text-center text-white">📱 블라인드 리모컨 매뉴얼</h3>
-                <ul class="space-y-4 text-base text-gray-300">
-                    <li class="flex items-start"><span class="mr-3 text-xl">🔒</span> <span><strong>절대 보안:</strong> 폰에 사진이 뜨지 않아 유출 걱정이 없습니다. PC 모니터를 보며 조작하세요.</span></li>
-                    <li class="flex items-start"><span class="mr-3 text-xl">👉</span> <span><strong>스와이프:</strong> 트랙패드 영역을 좌우로 밀어 사진을 빠르게 넘기세요.</span></li>
-                    <li class="flex items-start"><span class="mr-3 text-xl">⭐</span> <span><strong>메타데이터:</strong> 하단의 별점 및 색상 라벨 버튼을 눌러 사진을 즉시 분류하세요.</span></li>
+        <div id="remote-help-overlay" class="hidden absolute inset-0 bg-gray-900/95 z-[110] flex-col p-6 items-center justify-center">
+            <div class="bg-gray-800 rounded-xl p-5 w-full max-w-sm shadow-2xl border border-gray-700">
+                <h3 class="text-lg font-bold mb-4 text-center">📱 스마트 리모컨 매뉴얼</h3>
+                <ul class="space-y-3 text-sm text-gray-300">
+                    <li class="flex items-start"><span class="mr-2">👉</span> <span><strong>스와이프:</strong> 화면을 좌우로 밀어 이전/다음 사진 넘기기</span></li>
+                    <li class="flex items-start"><span class="mr-2">🤏</span> <span><strong>두 손가락 줌:</strong> 사진 확대/축소 및 자유 이동</span></li>
+                    <li class="flex items-start"><span class="mr-2">✌️</span> <span><strong>더블 탭 (2번 터치):</strong> 화면 맞춤 복귀</span></li>
+                    <li class="flex items-start"><span class="mr-2">🤟</span> <span><strong>트리플 탭 (3번 터치):</strong> 전체화면 모드 토글 (메뉴 숨김)</span></li>
+                    <li class="flex items-start"><span class="mr-2">⭐</span> <span><strong>별점/라벨:</strong> 하단 메뉴를 터치해 즉각적인 사진 분류</span></li>
                 </ul>
-                <button id="btn-remote-help-close" class="mt-8 w-full py-3 bg-blue-600 hover:bg-blue-500 rounded-xl text-white font-bold text-lg transition">닫기</button>
+                <button id="btn-remote-help-close" class="mt-6 w-full py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-white font-bold transition">닫기</button>
             </div>
         </div>
     </div>
@@ -576,11 +518,10 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInWithCustomToken, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, getDoc, collection, getDocs, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, getDoc, collection, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         const IMG_EXT_REGEX = /\.(jpe?g|png|webp|dng|cr2|cr3|nef|arw|raf|orf|rw2|pef|srw)$/i;
 
-        // Firebase Cloud DB 설정 (로컬 환경 예외 처리 강화)
         let useCloud = false;
         let app, auth, db, currentUserId = null;
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
@@ -592,29 +533,23 @@
                 auth = getAuth(app);
                 db = getFirestore(app);
                 useCloud = true;
-            } catch(e) {
-                console.warn("Firebase Init failed locally.", e);
-            }
+            } catch(e) {}
         }
 
         // --- 상태 변수 ---
         let srcDirHandle = null, destDirHandle = null, isZipMode = false;
         let allFiles = [], filteredFiles = [];
         let currentIndex = -1, currentObjectUrl = null;
-        
         let selectedIndices = new Set();
         let lastSelectedIndex = 0;
         let viewedFilesSet = new Set(); 
         let loadedContextId = ''; 
-        let currentSessionId = 0; // 작업 충돌 방지용 글로벌 세션 ID
+        let currentSessionId = 0; 
         
-        let zoomMulti = 1; 
-        let viewMode = 'fit', lastCustomZoomMulti = 2.5;
+        let zoomMulti = 1, viewMode = 'fit', lastCustomZoomMulti = 2.5;
         let panX = 0, panY = 0;
-        let isDragging = false, isClick = false;
-        let startX = 0, startY = 0;
-        let isLoupeActive = false, isNavVisible = false;
-        let userClosedNav = false; 
+        let isDragging = false, isClick = false, startX = 0, startY = 0;
+        let isLoupeActive = false, isNavVisible = false, userClosedNav = false; 
         let loupeRelativeScale = 2.0; 
         let transformState = { rotate: 0, flipX: 1, flipY: 1 };
         let animationFrameId = null;
@@ -623,22 +558,20 @@
         let refZoomMulti = 1, refPanX = 0, refPanY = 0;
         let isRefDragging = false, refStartX = 0, refStartY = 0;
         let refTransformState = { rotate: 0, flipX: 1, flipY: 1 };
-        let currentRefObjectUrl = null;
-        let refAnimationFrameId = null;
+        let currentRefObjectUrl = null, refAnimationFrameId = null;
         
-        // 클라우드 동기화 타겟 상태 변수
         let isExifAutoRotateEnabled = true;
         let currentRating = 0, currentLabel = '';
         let isSidebarVisible = true; 
 
-        // 스크린 세이버 상태 변수
-        let idleTimer = null;
-        let isScreensaverActive = false;
-        const IDLE_TIMEOUT = 30 * 1000; // 30초
+        let idleTimer = null, isScreensaverActive = false;
+        const IDLE_TIMEOUT = 30 * 1000; 
         
-        // Firebase 기반 P2P 대용 변수
-        let myPeerId = null;
+        // P2P WebRTC 변수
+        let myPeer = null, remoteConn = null, myPeerId = null;
         let qrCodeObj = null;
+        let isPeerConnecting = false;
+        let currentTransferId = null;
 
         const defaultShortcuts = {
             prev: 'arrowleft', next: 'arrowright',
@@ -647,7 +580,7 @@
             rate1: '1', rate2: '2', rate3: '3', rate4: '4', rate5: '5', rate0: '0',
             labelRed: '6', labelYellow: '7', labelGreen: '8', labelBlue: '9', labelPurple: 't',
             move: 'enter', modal: 'h',
-            fullScreenAndSaver: '*' // 전체화면 켜기/끄기 기본값 변경
+            fullScreenAndSaver: '*' 
         };
         let userShortcuts = { ...defaultShortcuts };
         let isBindingKey = false, bindingAction = null;
@@ -692,14 +625,13 @@
             btnShortcuts: document.getElementById('btn-shortcuts'), btnCloseModal: document.getElementById('btn-close-modal'), btnResetShortcuts: document.getElementById('btn-reset-shortcuts'),
             statExif: document.getElementById('stat-exif'),
             
-            // WebRTC UI
             btnRemoteMode: document.getElementById('btn-remote-mode'),
             qrModal: document.getElementById('qr-modal'),
             qrContainer: document.getElementById('qrcode-container'),
             btnCloseQr: document.getElementById('btn-close-qr')
         };
 
-        // --- 마우스 드래그를 이용한 스와이프 스크롤 (Pointer Events 방식) ---
+        // --- 마우스 드래그를 이용한 스와이프 스크롤 ---
         function enableDragScroll(selector) {
             const slider = document.querySelector(selector);
             if (!slider) return;
@@ -708,25 +640,20 @@
             let scrollLeft;
 
             slider.addEventListener('pointerdown', (e) => {
-                // 클릭 가능한 요소(버튼, 입력창 등)를 클릭한 경우는 드래그 기능 무시
-                if (e.target.closest('button') || e.target.closest('input') || e.target.closest('select') || e.target.closest('label')) {
-                    return;
-                }
+                if (e.target.closest('button') || e.target.closest('input') || e.target.closest('select') || e.target.closest('label')) return;
                 isDown = true;
                 startX = e.pageX - slider.offsetLeft;
                 scrollLeft = slider.scrollLeft;
                 if (slider.setPointerCapture) slider.setPointerCapture(e.pointerId);
             });
-            
             slider.addEventListener('pointerleave', () => { isDown = false; });
             slider.addEventListener('pointerup', () => { isDown = false; });
             slider.addEventListener('pointercancel', () => { isDown = false; });
-            
             slider.addEventListener('pointermove', (e) => {
                 if (!isDown) return;
                 e.preventDefault();
                 const x = e.pageX - slider.offsetLeft;
-                const walk = (x - startX) * 1.5; // 스크롤 속도
+                const walk = (x - startX) * 1.5; 
                 slider.scrollLeft = scrollLeft - walk;
             });
         }
@@ -774,7 +701,7 @@
                 } else {
                     viewedFilesSet.clear();
                 }
-            } catch(e) { console.error(e); }
+            } catch(e) {}
         }
 
         async function saveViewedProgress() {
@@ -786,7 +713,7 @@
                     viewedFiles: Array.from(viewedFilesSet)
                 });
                 cleanupOldProgress(); 
-            } catch(e) { console.error(e); }
+            } catch(e) {}
         }
 
         async function cleanupOldProgress() {
@@ -806,44 +733,34 @@
                         await deleteDoc(doc(db, 'artifacts', appId, 'users', currentUserId, 'progress', docsList[i].id));
                     }
                 }
-            } catch(e) { console.error(e); }
+            } catch(e) {}
         }
         
-        // --- 브라우저 저장소 (캐시) 관리 함수 ---
         async function updateStorageUsage() {
             const usageEl = document.getElementById('storage-usage');
             if (!usageEl) return;
-            
             let totalBytes = 0;
-            // LocalStorage 용량 계산
             for (let i = 0; i < localStorage.length; i++) {
                 const key = localStorage.key(i);
                 const value = localStorage.getItem(key);
                 totalBytes += (key.length + value.length) * 2;
             }
-            
-            // Cache API 용량 계산
             if (navigator.storage && navigator.storage.estimate) {
                 try {
                     const estimate = await navigator.storage.estimate();
                     totalBytes += estimate.usage || 0;
                 } catch(e) {}
             }
-            
             const mb = (totalBytes / (1024 * 1024)).toFixed(2);
             usageEl.textContent = `${mb} MB 사용 중`;
         }
 
-        // 캐시 삭제 (초기화 시 바인딩)
         document.getElementById('btn-clear-cache').addEventListener('click', async () => {
             if (!confirm('단축키 및 테마 설정을 제외한 열람 기록 및 앱 캐시를 모두 삭제하시겠습니까?')) return;
-            
             const keysToRemove = [];
             for (let i = 0; i < localStorage.length; i++) {
                 const key = localStorage.key(i);
-                if (key && key.startsWith('photoCulling_viewed_')) {
-                    keysToRemove.push(key);
-                }
+                if (key && key.startsWith('photoCulling_viewed_')) keysToRemove.push(key);
             }
             keysToRemove.forEach(k => localStorage.removeItem(k));
             viewedFilesSet.clear();
@@ -854,11 +771,8 @@
                     await Promise.all(cacheNames.map(name => caches.delete(name)));
                 } catch(e) {}
             }
-            
             showToast('캐시가 성공적으로 삭제되었습니다.');
-            updateStorageUsage();
-            updateDashboard();
-            renderFileList();
+            updateStorageUsage(); updateDashboard(); renderFileList();
         });
 
         // --- 스크린 세이버 함수 ---
@@ -894,7 +808,6 @@
         function resetIdleTimer() {
             if (isScreensaverActive) hideScreensaver();
             if (idleTimer) clearTimeout(idleTimer);
-            // 15초(15000ms) 미조작 시 스크린세이버
             idleTimer = setTimeout(showScreensaver, 15000);
         }
 
@@ -966,11 +879,9 @@
 
             ui.statProgressTxt.textContent = Math.round(progressRate) + '%';
             ui.statProgressBar.style.width = progressRate + '%';
-            
             ui.statSelectCount.textContent = selectedCount;
             ui.statSelectTxt.textContent = Math.round(selectRate) + '%';
             ui.statSelectBar.style.width = selectRate + '%';
-            
             ui.statEstimate.textContent = estimatedCount;
         }
 
@@ -982,7 +893,7 @@
             return false;
         }
 
-        // --- 단축키 설정 부분 ---
+        // --- 단축키 설정 ---
         function loadShortcuts() {
             const saved = localStorage.getItem('photoCullingShortcuts_v6');
             if (saved) { try { userShortcuts = { ...defaultShortcuts, ...JSON.parse(saved) }; } catch(e) {} }
@@ -1058,11 +969,8 @@
             
             if (e.shiftKey && key === 'r') { e.preventDefault(); toggleCompareMode(); return; }
 
-            // 전체화면 토글
             if (key === userShortcuts.fullScreenAndSaver) { 
-                e.preventDefault(); 
-                toggleFullscreen(); 
-                return; 
+                e.preventDefault(); toggleFullscreen(); return; 
             }
             
             if (key === 'escape') { ui.modal.classList.add('hidden'); return; }
@@ -1099,9 +1007,7 @@
         function handleKeyup(e) { if (e.key.toLowerCase() === userShortcuts.loupe) toggleLoupe(false); }
 
         function toggleCompareMode() {
-            if (filteredFiles.length === 0) {
-                showToast('사진 목록을 먼저 불러와주세요.'); return;
-            }
+            if (filteredFiles.length === 0) { showToast('사진 목록을 먼저 불러와주세요.'); return; }
             isCompareMode = !isCompareMode;
             if (isCompareMode) {
                 ui.refWrapper.classList.remove('hidden'); ui.refWrapper.classList.add('block');
@@ -1128,11 +1034,10 @@
             }
         }
 
-        // 전체화면 시 마우스 호버로 툴바 표시/숨김 설정
         function setupFullscreenHover() {
             window.addEventListener('mousemove', (e) => {
                 if (!document.body.classList.contains('fullscreen-mode')) return;
-                const margin = 60; // 툴바가 나타나는 마진(픽셀) 확대
+                const margin = 60; 
                 document.body.classList.toggle('show-header', e.clientY < margin);
                 document.body.classList.toggle('show-footer', e.clientY > window.innerHeight - margin);
                 
@@ -1142,7 +1047,6 @@
                 }
             });
             
-            // 전체화면 상태 동기화 처리
             document.addEventListener('fullscreenchange', () => {
                 if (!document.fullscreenElement) {
                     document.body.classList.remove('fullscreen-mode', 'show-header', 'show-footer', 'show-sidebar');
@@ -1180,7 +1084,7 @@
                         
                         if (handles.length === 1 && handles[0].kind === 'directory') {
                             if (await verifyPermission(handles[0], true)) {
-                                currentSessionId++; // 새로운 세션 시작
+                                currentSessionId++; 
                                 srcDirHandle = handles[0];
                                 openSourceDirectory(handles[0]);
                             } else {
@@ -1223,98 +1127,204 @@
             });
         }
 
-        // --- P2P WebRTC 대체: 완벽한 Firebase 블라인드 리모컨 동기화 ---
-        async function initHostRemote() {
-            if (!useCloud || !db) {
-                showToast('이 환경에서는 보안 리모컨 기능을 지원하지 않습니다.', true);
-                return;
-            }
-
-            if (window.unsubscribeRemote) {
+        // --- 순수 P2P WebRTC 로직 (사진 유출 0%, Firebase 저장 안 함) ---
+        function initHostPeer() {
+            if (myPeer && !myPeer.destroyed) {
                 ui.qrModal.classList.replace('hidden', 'flex');
                 return;
             }
-
+            if (isPeerConnecting) return;
+            
+            isPeerConnecting = true;
             showToast('보안 서버 초기화 중...');
-            myPeerId = Math.random().toString(36).substring(2, 8); // 랜덤 세션 ID 발급
-            const currentUrl = window.location.href.split('?')[0];
-            const remoteUrl = `${currentUrl}?remote=${myPeerId}`;
             
-            ui.qrContainer.innerHTML = '';
-            
-            if (qrCodeObj) {
-                qrCodeObj.clear();
-            }
-            
-            qrCodeObj = new QRCode(ui.qrContainer, {
-                text: remoteUrl, width: 200, height: 200, colorDark: "#000000", colorLight: "#ffffff", correctLevel: QRCode.CorrectLevel.H
-            });
-            ui.qrModal.classList.replace('hidden', 'flex');
-            
-            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'remote_sessions', myPeerId);
-            await setDoc(docRef, { host: { timestamp: Date.now() }, remote: { timestamp: 0 } });
+            try {
+                myPeer = new Peer({
+                    debug: 1,
+                    config: {
+                        iceServers: [
+                            { urls: 'stun:stun.l.google.com:19302' },
+                            { urls: 'stun:stun1.l.google.com:19302' }
+                        ]
+                    }
+                }); 
+                
+                myPeer.on('open', id => {
+                    isPeerConnecting = false;
+                    myPeerId = id;
+                    const currentUrl = window.location.href.split('?')[0];
+                    
+                    const qrInfo = document.getElementById('qr-info-text');
+                    if (currentUrl.startsWith('file://')) {
+                        showToast('경고: file:// 주소는 모바일에서 접속할 수 없습니다. 로컬 서버나 웹 호스팅을 이용하세요.', true);
+                        if(qrInfo) qrInfo.innerHTML = '<span class="text-red-400 font-bold">주의: 현재 로컬 파일 모드로 실행 중이므로 스마트폰에서 접속할 수 없습니다.</span><br>Vercel 호스팅이나 로컬 서버를 통해 열어주세요.';
+                    } else if(qrInfo) {
+                        qrInfo.innerHTML = '스마트폰 카메라로 위 QR 코드를 스캔하세요.<br>이 창을 닫아도 연결은 유지됩니다.';
+                    }
 
-            showToast('스마트폰 연결 대기 중...');
-            ui.btnRemoteMode.classList.add('bg-emerald-600', 'text-white');
+                    const remoteUrl = `${currentUrl}?remote=${myPeerId}`;
+                    
+                    ui.qrContainer.innerHTML = '';
+                    if (qrCodeObj) { qrCodeObj.clear(); }
+                    
+                    qrCodeObj = new QRCode(ui.qrContainer, {
+                        text: remoteUrl, width: 200, height: 200, colorDark: "#000000", colorLight: "#ffffff", correctLevel: QRCode.CorrectLevel.H
+                    });
+                    
+                    ui.qrModal.classList.replace('hidden', 'flex');
+                    showToast('모바일 연결 준비 완료!');
+                });
+                
+                myPeer.on('connection', conn => {
+                    remoteConn = conn;
+                    ui.btnRemoteMode.classList.add('bg-emerald-600', 'text-white');
+                    ui.qrModal.classList.replace('flex', 'hidden');
+                    showToast('스마트폰이 안전하게 연결되었습니다!');
+                    
+                    const pingInterval = setInterval(() => {
+                        if (remoteConn && remoteConn.open) remoteConn.send({ type: 'ping' });
+                    }, 10000);
 
-            window.unsubscribeRemote = onSnapshot(docRef, (docSnap) => {
-                if (docSnap.exists()) {
-                    const data = docSnap.data();
-                    // 모바일(리모컨)에서 보낸 명령 처리
-                    if (data.remote && data.remote.timestamp > (window.lastRemoteTimestamp || 0)) {
-                        window.lastRemoteTimestamp = data.remote.timestamp;
-                        const cmd = data.remote.command;
-                        
-                        if (cmd === 'prev') navigate(-1);
-                        else if (cmd === 'next') navigate(1);
-                        else if (cmd === 'jump') {
-                            if(data.remote.jumpIndex >= 0 && data.remote.jumpIndex < filteredFiles.length) {
-                                currentIndex = data.remote.jumpIndex;
+                    conn.on('data', data => {
+                        if(data.action === 'ping') return;
+                        if(data.action === 'requestCurrentState') {
+                            syncWithRemote(); 
+                            return;
+                        }
+                        if(data.action === 'prev') navigate(-1);
+                        else if(data.action === 'next') navigate(1);
+                        else if (data.action === 'rate') updateMetadata(data.val, currentLabel);
+                        else if (data.action === 'label') {
+                            const targetLabel = data.val;
+                            updateMetadata(currentRating, currentLabel === targetLabel ? '' : targetLabel);
+                        }
+                        else if(data.action === 'requestList') {
+                            const listData = filteredFiles.map((f, i) => ({name: f.name, idx: i, viewed: viewedFilesSet.has(f.name)}));
+                            conn.send({ type: 'fileList', list: listData, currentIndex });
+                        }
+                        else if(data.action === 'jump') {
+                            if(data.index >= 0 && data.index < filteredFiles.length) {
+                                currentIndex = data.index;
                                 selectedIndices.clear(); selectedIndices.add(currentIndex); lastSelectedIndex = currentIndex;
                                 displayCurrentImage();
                             }
                         }
-                        else if (cmd === 'rate') {
-                            updateMetadata(data.remote.val, currentLabel);
-                        }
-                        else if (cmd === 'label') {
-                            const targetLabel = data.remote.val;
-                            updateMetadata(currentRating, currentLabel === targetLabel ? '' : targetLabel);
-                        }
-                        else if (cmd === 'init') {
-                            showToast('스마트폰 보안 리모컨이 연결되었습니다!');
-                            syncWithRemote();
-                        }
+                    });
+                    
+                    conn.on('close', () => { 
+                        clearInterval(pingInterval);
+                        remoteConn = null; 
+                        ui.btnRemoteMode.classList.remove('bg-emerald-600', 'text-white');
+                        showToast('리모컨 연결이 끊어졌습니다.'); 
+                    });
+                });
+                
+                myPeer.on('error', err => {
+                    isPeerConnecting = false;
+                    let errMsg = '알 수 없는 P2P 서버 오류';
+                    if (err.type === 'network' || err.type === 'server-error') errMsg = 'P2P 서버가 혼잡하거나 네트워크 연결이 끊겼습니다.';
+                    else if (err.type === 'peer-unavailable') errMsg = '연결할 기기를 찾을 수 없습니다.';
+                    else if (err.type === 'browser-incompatible') errMsg = '호환되지 않는 브라우저입니다.';
+                    showToast(`${errMsg} 다시 버튼을 눌러주세요.`, true);
+                    if (myPeer) { myPeer.destroy(); myPeer = null; }
+                    ui.qrModal.classList.replace('flex', 'hidden');
+                });
+
+                myPeer.on('disconnected', () => {
+                    if (myPeer && !myPeer.destroyed) {
+                        showToast('P2P 서버와 연결이 끊어졌습니다. 재연결 중...');
+                        myPeer.reconnect();
                     }
-                }
-            }, (error) => {
-                console.error("Firebase Sync Error", error);
-            });
-        }
-        
-        // Host -> Remote (블라인드 전송: 사진은 전송 안함, 현재 번호와 상태만 전송)
-        async function syncWithRemote() {
-            if (!window.unsubscribeRemote || !useCloud || !db || filteredFiles.length === 0) return;
-            try {
-                const fileObj = filteredFiles[currentIndex];
-                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'remote_sessions', myPeerId);
-                await setDoc(docRef, {
-                    host: {
-                        fileName: fileObj.name,
-                        currentIndex: currentIndex,
-                        total: filteredFiles.length,
-                        rating: fileObj.rating || 0,
-                        label: fileObj.label || '',
-                        timestamp: Date.now()
-                    }
-                }, { merge: true });
-            } catch (e) {
-                console.error('리모컨 동기화 에러', e);
+                });
+
+            } catch(e) {
+                isPeerConnecting = false;
+                showToast('P2P 초기화 실패', true);
             }
         }
         
-        // --- 모바일 리모컨 모드 초기화 (Firebase 블라인드 모드) ---
-        function initRemoteMode(sessionId) {
+        // Host -> Remote (가장 안전한 Base64 분할 청크 전송: 외부 서버 개입 0%)
+        async function syncWithRemote() {
+            if (!remoteConn || !remoteConn.open || !ui.mainImage.src || ui.mainImage.src.startsWith('null') || filteredFiles.length === 0) return;
+            
+            const transferId = Date.now().toString();
+            currentTransferId = transferId;
+            
+            try {
+                const fileObj = filteredFiles[currentIndex];
+                remoteConn.send({ type: 'transfer_start', fileName: fileObj.name }); // 로딩 알림
+
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                
+                // 모바일 디스플레이용 최적 압축 해상도 (무한 로딩 방지)
+                const MAX_SIZE = 1200; 
+                
+                let w = ui.mainImage.naturalWidth;
+                let h = ui.mainImage.naturalHeight;
+                
+                if (w === 0 || h === 0) {
+                    setTimeout(syncWithRemote, 300); 
+                    return;
+                }
+                
+                if (w > MAX_SIZE || h > MAX_SIZE) {
+                    const ratio = Math.min(MAX_SIZE/w, MAX_SIZE/h);
+                    w *= ratio; h *= ratio;
+                }
+                
+                canvas.width = w; canvas.height = h;
+                
+                ctx.translate(w/2, h/2);
+                ctx.rotate((transformState.rotate * Math.PI) / 180);
+                ctx.scale(transformState.flipX, transformState.flipY);
+                
+                const isRotated = Math.abs(transformState.rotate) % 180 === 90;
+                if(isRotated) ctx.drawImage(ui.mainImage, -h/2, -w/2, h, w);
+                else ctx.drawImage(ui.mainImage, -w/2, -h/2, w, h);
+                
+                // Base64 문자열화
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.8); 
+                
+                if (currentTransferId !== transferId) return;
+
+                const chunkSize = 16384; // 16KB 조각
+                const totalChunks = Math.ceil(dataUrl.length / chunkSize);
+
+                // 메타데이터 및 청크 수신 대비 헤더 전송
+                remoteConn.send({ 
+                    type: 'state_meta', 
+                    fileId: transferId, 
+                    fileName: fileObj.name, 
+                    currentIndex, 
+                    total: filteredFiles.length,
+                    totalChunks: totalChunks,
+                    rating: fileObj.rating || 0,
+                    label: fileObj.label || ''
+                });
+
+                // 문자열 청크 전송
+                for (let i = 0; i < totalChunks; i++) {
+                    if (currentTransferId !== transferId || !remoteConn.open) break;
+                    
+                    remoteConn.send({
+                        type: 'state_chunk',
+                        fileId: transferId,
+                        chunkIndex: i,
+                        chunkData: dataUrl.substring(i * chunkSize, (i + 1) * chunkSize)
+                    });
+                    
+                    // 버퍼 오버플로우 방지 (WebRTC 통신 뻗음 방지)
+                    if (i % 10 === 0) await new Promise(r => setTimeout(r, 10)); 
+                }
+
+            } catch (e) {
+                console.error('리모컨 썸네일 전송 에러', e);
+            }
+        }
+        
+        // --- 모바일 리모컨 렌더링 부 ---
+        function initRemoteMode(hostId) {
             Array.from(document.body.children).forEach(child => {
                 if (child.id !== 'remote-view' && child.id !== 'toast' && child.tagName !== 'SCRIPT') {
                     child.style.display = 'none';
@@ -1325,98 +1335,146 @@
             remoteView.classList.remove('hidden'); remoteView.classList.add('flex');
             
             const filenameEl = document.getElementById('remote-filename');
+            const imgEl = document.getElementById('remote-img');
             const container = document.getElementById('remote-img-container');
             const overlayEl = document.getElementById('remote-swipe-overlay');
             const overlayText = overlayEl.querySelector('span');
-            let isMobileFullscreen = false;
 
-            if (!useCloud || !db) {
-                filenameEl.textContent = '클라우드 연결 오류';
-                return;
+            let remoteScale = 1, remotePanX = 0, remotePanY = 0;
+            let baseScale = 1;
+            let remoteViewMode = 'fit';
+            let initialDistance = 0, initialScale = 1;
+            let lastPanX = 0, lastPanY = 0;
+            let tapCount = 0, tapTimer = null;
+            let isMobileFullscreen = false;
+            
+            let incomingImage = {}; // 조각 모음용
+            
+            function updateRemoteScale() {
+                if(!imgEl.naturalWidth) return;
+                const cRect = container.getBoundingClientRect();
+                const sX = cRect.width / imgEl.naturalWidth;
+                const sY = cRect.height / imgEl.naturalHeight;
+                baseScale = remoteViewMode === 'width' ? sX : Math.min(sX, sY);
+                applyRemoteTransform();
             }
 
-            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'remote_sessions', sessionId);
+            function applyRemoteTransform() {
+                imgEl.style.transform = `translate(calc(-50% + ${remotePanX}px), calc(-50% + ${remotePanY}px)) scale(${baseScale * remoteScale})`;
+            }
+
+            function toggleMobileFullscreen() {
+                const topBar = document.getElementById('remote-top-bar');
+                const bottomBar = document.getElementById('remote-bottom-bar');
+                if (!isMobileFullscreen) {
+                    if(document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(()=>{});
+                    topBar.style.transform = 'translateY(-100%)';
+                    bottomBar.style.transform = 'translateY(100%)';
+                    isMobileFullscreen = true;
+                } else {
+                    if(document.exitFullscreen) document.exitFullscreen().catch(()=>{});
+                    topBar.style.transform = 'translateY(0)';
+                    bottomBar.style.transform = 'translateY(0)';
+                    isMobileFullscreen = false;
+                }
+            }
             
-            const sendAction = async (cmd, params = {}) => {
-                try {
-                    await setDoc(docRef, {
-                        remote: { command: cmd, timestamp: Date.now(), ...params }
-                    }, { merge: true });
-                } catch(e) {}
+            window.addEventListener('resize', updateRemoteScale);
+
+            let conn;
+            const sendAction = (action, params = {}) => {
+                if (conn && conn.open) conn.send({ action, ...params });
             };
 
             document.getElementById('btn-remote-prev').addEventListener('click', (e) => { e.stopPropagation(); sendAction('prev'); showSwipeEffect('이전'); });
             document.getElementById('btn-remote-next').addEventListener('click', (e) => { e.stopPropagation(); sendAction('next'); showSwipeEffect('다음'); });
-            document.getElementById('btn-remote-help').addEventListener('click', (e) => {
-                e.stopPropagation();
-                document.getElementById('remote-help-overlay').classList.remove('hidden');
-                document.getElementById('remote-help-overlay').classList.add('flex');
-            });
-            document.getElementById('btn-remote-help-close').addEventListener('click', (e) => {
-                e.stopPropagation();
-                document.getElementById('remote-help-overlay').classList.add('hidden');
-                document.getElementById('remote-help-overlay').classList.remove('flex');
-            });
-
-            // 별점 버튼
+            
+            // 별점 및 라벨 전송
             document.querySelectorAll('.remote-star-btn').forEach(btn => {
                 btn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    const val = parseInt(btn.dataset.val);
+                    e.stopPropagation(); const val = parseInt(btn.dataset.val);
                     sendAction('rate', { val: val });
                     showSwipeEffect(val === 0 ? '별점 해제' : `별점 ${val}점`);
                 });
             });
 
-            // 라벨 버튼
             document.querySelectorAll('.remote-label-btn').forEach(btn => {
                 btn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    const val = btn.dataset.val;
+                    e.stopPropagation(); const val = btn.dataset.val;
                     sendAction('label', { val: val });
-                    
                     let colorName = val;
-                    if(val==='Red') colorName = '빨강';
-                    else if(val==='Yellow') colorName = '노랑';
-                    else if(val==='Green') colorName = '초록';
-                    else if(val==='Blue') colorName = '파랑';
-                    else if(val==='Purple') colorName = '보라';
+                    if(val==='Red') colorName = '빨강'; else if(val==='Yellow') colorName = '노랑'; else if(val==='Green') colorName = '초록'; else if(val==='Blue') colorName = '파랑'; else if(val==='Purple') colorName = '보라';
                     showSwipeEffect(`${colorName} 라벨`);
                 });
             });
 
-            // 제스처 (터치패드)
-            let startX = 0, startY = 0, isSwiping = false;
-            let tapCount = 0, tapTimer = null;
+            document.getElementById('btn-remote-list').addEventListener('click', (e) => {
+                e.stopPropagation(); sendAction('requestList');
+                document.getElementById('remote-list-overlay').classList.remove('hidden'); document.getElementById('remote-list-overlay').classList.add('flex');
+            });
+            document.getElementById('btn-remote-list-close').addEventListener('click', (e) => {
+                e.stopPropagation();
+                document.getElementById('remote-list-overlay').classList.add('hidden'); document.getElementById('remote-list-overlay').classList.remove('flex');
+            });
+            document.getElementById('btn-remote-fit').addEventListener('click', (e) => {
+                e.stopPropagation(); remoteViewMode = 'fit'; remoteScale = 1; remotePanX = 0; remotePanY = 0; updateRemoteScale();
+                document.getElementById('btn-remote-fit').classList.replace('bg-gray-700', 'bg-blue-600'); document.getElementById('btn-remote-width').classList.replace('bg-blue-600', 'bg-gray-700');
+            });
+            document.getElementById('btn-remote-width').addEventListener('click', (e) => {
+                e.stopPropagation(); remoteViewMode = 'width'; remoteScale = 1; remotePanX = 0; remotePanY = 0; updateRemoteScale();
+                document.getElementById('btn-remote-width').classList.replace('bg-gray-700', 'bg-blue-600'); document.getElementById('btn-remote-fit').classList.replace('bg-blue-600', 'bg-gray-700');
+            });
+            document.getElementById('btn-remote-help').addEventListener('click', (e) => {
+                e.stopPropagation(); document.getElementById('remote-help-overlay').classList.remove('hidden'); document.getElementById('remote-help-overlay').classList.add('flex');
+            });
+            document.getElementById('btn-remote-help-close').addEventListener('click', (e) => {
+                e.stopPropagation(); document.getElementById('remote-help-overlay').classList.add('hidden'); document.getElementById('remote-help-overlay').classList.remove('flex');
+            });
 
-            function toggleMobileFullscreen() {
-                if (!isMobileFullscreen) {
-                    if(document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(()=>{});
-                    isMobileFullscreen = true;
-                } else {
-                    if(document.exitFullscreen) document.exitFullscreen().catch(()=>{});
-                    isMobileFullscreen = false;
-                }
-            }
+            // 제스처
+            let startX = 0, startY = 0, isSwiping = false;
 
             container.addEventListener('touchstart', e => {
                 if (e.target.closest('button')) return;
 
                 if (e.touches.length === 1) {
                     startX = e.touches[0].clientX; startY = e.touches[0].clientY; isSwiping = true;
-                } 
+                } else if (e.touches.length === 2) {
+                    isSwiping = false;
+                    initialDistance = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+                    initialScale = remoteScale;
+                }
                 
                 tapCount++;
                 if (tapCount === 1) { tapTimer = setTimeout(() => { tapCount = 0; }, 300); } 
                 else if (tapCount === 2) {
                     clearTimeout(tapTimer);
-                    tapCount = 0; toggleMobileFullscreen();
+                    tapTimer = setTimeout(() => { 
+                        remoteScale = 1; remotePanX = 0; remotePanY = 0; remoteViewMode = 'fit';
+                        updateRemoteScale();
+                        document.getElementById('btn-remote-fit').className = "px-2 py-1.5 bg-blue-600 rounded text-[10px] font-bold transition-colors";
+                        document.getElementById('btn-remote-width').className = "px-2 py-1.5 bg-gray-700 rounded text-[10px] font-bold transition-colors";
+                        tapCount = 0; 
+                    }, 300);
+                } else if (tapCount === 3) {
+                    clearTimeout(tapTimer); tapCount = 0; toggleMobileFullscreen();
                 }
             }, {passive: false});
 
             container.addEventListener('touchmove', e => {
                 if (e.target.closest('button')) return;
                 e.preventDefault(); 
+                
+                if(e.touches.length === 1 && isSwiping) {
+                    const dx = e.touches[0].clientX - startX; const dy = e.touches[0].clientY - startY;
+                    if (remoteScale > 1.05 || remoteViewMode === 'width') {
+                        remotePanX = lastPanX + dx; remotePanY = lastPanY + dy; applyRemoteTransform();
+                    }
+                } else if (e.touches.length === 2) {
+                    const currentDistance = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+                    remoteScale = initialScale * (currentDistance / initialDistance);
+                    remoteScale = Math.max(0.5, Math.min(remoteScale, 10)); applyRemoteTransform();
+                }
             }, {passive: false});
 
             container.addEventListener('touchend', e => {
@@ -1424,9 +1482,11 @@
                 
                 if(isSwiping && e.changedTouches.length === 1) {
                     const dx = e.changedTouches[0].clientX - startX;
-                    if (dx > 50) { sendAction('prev'); showSwipeEffect('이전'); }
-                    else if (dx < -50) { sendAction('next'); showSwipeEffect('다음'); }
-                }
+                    if (remoteScale <= 1.05 && remoteViewMode === 'fit') {
+                        if (dx > 50) { sendAction('prev'); showSwipeEffect('이전'); }
+                        else if (dx < -50) { sendAction('next'); showSwipeEffect('다음'); }
+                    } else { lastPanX = remotePanX; lastPanY = remotePanY; }
+                } else { lastPanX = remotePanX; lastPanY = remotePanY; }
                 isSwiping = false;
             });
             
@@ -1435,61 +1495,130 @@
                 setTimeout(() => { overlayEl.style.opacity = '0'; }, 300);
             }
 
-            // Listen for Host Updates
-            filenameEl.textContent = 'PC 연결 대기 중...';
-            
-            onSnapshot(docRef, (docSnap) => {
-                if (docSnap.exists()) {
-                    const data = docSnap.data();
-                    
-                    if (data.host && data.host.timestamp > (window.lastHostTimestamp || 0)) {
-                        window.lastHostTimestamp = data.host.timestamp;
-                        filenameEl.textContent = `${data.host.currentIndex + 1}/${data.host.total} - ${data.host.fileName}`;
-                        
-                        // 현재 별점/라벨 상태 버튼에 반영
-                        const r = data.host.rating;
-                        const l = data.host.label;
-                        
-                        document.querySelectorAll('.remote-star-btn').forEach(btn => {
-                            const val = parseInt(btn.dataset.val);
-                            if(val === 0) return;
-                            if (val <= r) {
-                                btn.classList.add('text-yellow-400'); btn.classList.remove('text-gray-500');
-                            } else {
-                                btn.classList.add('text-gray-500'); btn.classList.remove('text-yellow-400');
-                            }
-                        });
-
-                        document.querySelectorAll('.remote-label-btn').forEach(btn => {
-                            if(btn.dataset.val === l) {
-                                btn.classList.add('border-white'); btn.classList.remove('border-transparent');
-                            } else {
-                                btn.classList.remove('border-white'); btn.classList.add('border-transparent');
-                            }
-                        });
+            // P2P 연결 시작
+            try {
+                const peer = new Peer({
+                    debug: 1,
+                    config: {
+                        iceServers: [
+                            { urls: 'stun:stun.l.google.com:19302' },
+                            { urls: 'stun:stun1.l.google.com:19302' }
+                        ]
                     }
-                }
-            }, (error) => {
-                console.error("Firebase Sync Error", error);
-                filenameEl.textContent = '통신 오류';
-            });
-            
-            // Let host know remote is connected
-            sendAction('init');
+                });
+
+                peer.on('open', () => {
+                    conn = peer.connect(hostId, { reliable: true });
+                    let pingInterval;
+                    
+                    conn.on('open', () => {
+                        showToast('보안 P2P 연결 성공!');
+                        filenameEl.textContent = '사진 수신 대기 중...';
+                        filenameEl.classList.replace('text-white', 'text-emerald-400');
+
+                        pingInterval = setInterval(() => { if (conn && conn.open) conn.send({ action: 'ping' }); }, 10000);
+                        conn.send({ action: 'requestCurrentState' }); // 화면 요청
+                    });
+                    
+                    conn.on('data', data => {
+                        if (data.type === 'ping') return;
+                        
+                        if (data.type === 'transfer_start') {
+                            filenameEl.textContent = `수신 중...`;
+                            filenameEl.classList.replace('text-emerald-400', 'text-white');
+                        } else if (data.type === 'state_meta') {
+                            incomingImage[data.fileId] = {
+                                chunks: new Array(data.totalChunks),
+                                receivedCount: 0,
+                                totalChunks: data.totalChunks,
+                                fileName: data.fileName,
+                                currentIndex: data.currentIndex,
+                                total: data.total
+                            };
+                            filenameEl.textContent = `수신 중... 0%`;
+                            
+                            // UI 메타데이터 업데이트
+                            const r = data.rating; const l = data.label;
+                            document.querySelectorAll('.remote-star-btn').forEach(btn => {
+                                const val = parseInt(btn.dataset.val);
+                                if(val === 0) return;
+                                if (val <= r) { btn.classList.add('text-yellow-400'); btn.classList.remove('text-gray-500'); } 
+                                else { btn.classList.add('text-gray-500'); btn.classList.remove('text-yellow-400'); }
+                            });
+                            document.querySelectorAll('.remote-label-btn').forEach(btn => {
+                                if(btn.dataset.val === l) { btn.classList.add('border-white'); btn.classList.remove('border-transparent'); } 
+                                else { btn.classList.remove('border-white'); btn.classList.add('border-transparent'); }
+                            });
+                            
+                        } else if (data.type === 'state_chunk') {
+                            const imgData = incomingImage[data.fileId];
+                            if (!imgData) return; 
+                            
+                            imgData.chunks[data.chunkIndex] = data.chunkData;
+                            imgData.receivedCount++;
+                            
+                            const percent = Math.round((imgData.receivedCount / imgData.totalChunks) * 100);
+                            filenameEl.textContent = `수신 중... ${percent}%`;
+                            
+                            if (imgData.receivedCount === imgData.totalChunks) {
+                                // 문자열 조립
+                                imgEl.src = imgData.chunks.join('');
+                                filenameEl.textContent = `${imgData.currentIndex + 1}/${imgData.total} - ${imgData.fileName}`;
+                                remoteScale = 1; remotePanX = 0; remotePanY = 0;
+                                updateRemoteScale();
+                                
+                                filenameEl.classList.replace('text-white', 'text-emerald-400');
+                                delete incomingImage[data.fileId]; 
+                            }
+                        } else if(data.type === 'fileList') {
+                            const ul = document.getElementById('remote-file-list');
+                            ul.innerHTML = '';
+                            document.getElementById('remote-list-count').textContent = data.list.length;
+                            data.list.forEach(item => {
+                                const li = document.createElement('li');
+                                li.className = `p-3 rounded text-sm truncate ${item.idx === data.currentIndex ? 'bg-blue-600 text-white font-bold' : (item.viewed ? 'text-gray-400' : 'text-gray-200')} border-b border-gray-800 active:bg-gray-700`;
+                                li.textContent = `${item.idx + 1}. ${item.name}`;
+                                li.onclick = () => {
+                                    sendAction('jump', { index: item.idx });
+                                    document.getElementById('remote-list-overlay').classList.add('hidden');
+                                    document.getElementById('remote-list-overlay').classList.remove('flex');
+                                };
+                                ul.appendChild(li);
+                            });
+                        }
+                    });
+                    
+                    imgEl.onload = () => { updateRemoteScale(); };
+                    
+                    conn.on('close', () => {
+                        clearInterval(pingInterval);
+                        showToast('연결이 끊어졌습니다.', true);
+                        filenameEl.textContent = '연결 끊김';
+                        filenameEl.classList.replace('text-emerald-400', 'text-white');
+                    });
+                    conn.on('error', err => {
+                        clearInterval(pingInterval);
+                        showToast('통신 오류가 발생했습니다.', true);
+                        filenameEl.textContent = '통신 오류';
+                    });
+                });
+
+                peer.on('error', err => {
+                    showToast('서버 통신 실패', true);
+                    filenameEl.textContent = '서버 연결 실패';
+                });
+                peer.on('disconnected', () => {
+                    if (!peer.destroyed) peer.reconnect();
+                });
+            } catch(e) { showToast('P2P 초기화 실패', true); }
         }
 
         async function openFilesOrZip(preSelectedHandles = null) {
-            currentSessionId++; // 새로운 로드 세션 아이디 발급
+            currentSessionId++; 
             try {
                 const fileHandles = preSelectedHandles || await window.showOpenFilePicker({
                     multiple: true,
-                    types: [{
-                        description: '이미지 및 ZIP 파일',
-                        accept: { 
-                            'image/*': ['.jpg', '.jpeg', '.png', '.webp', '.dng', '.cr2', '.cr3', '.nef', '.arw', '.raf', '.orf', '.rw2', '.pef', '.srw'],
-                            'application/zip': ['.zip']
-                        }
-                    }]
+                    types: [{ description: '이미지 및 ZIP 파일', accept: { 'image/*': ['.jpg', '.jpeg', '.png', '.webp', '.dng', '.cr2', '.cr3', '.nef', '.arw', '.raf', '.orf', '.rw2', '.pef', '.srw'], 'application/zip': ['.zip'] } }]
                 });
 
                 if (fileHandles.length === 1 && fileHandles[0].name.toLowerCase().endsWith('.zip')) {
@@ -1504,14 +1633,13 @@
 
                 const sessionId = currentSessionId;
                 for (const handle of fileHandles) {
-                    if (sessionId !== currentSessionId) return; // 작업 중단
+                    if (sessionId !== currentSessionId) return; 
                     if (IMG_EXT_REGEX.test(handle.name.toLowerCase())) {
                         allFiles.push({ handle: handle, name: handle.name, rating: 0, label: '', xmpLoaded: false, isZip: false });
                     }
                 }
                 
                 if (sessionId === currentSessionId && allFiles.length > 0) {
-                    // 화면 업데이트 순서 버그 수정 (렌더링을 먼저 수행)
                     renderFileList();
                     await afterFilesLoaded();
                 } else if (sessionId === currentSessionId) {
@@ -1524,8 +1652,8 @@
         }
 
         async function loadZipFile(file) {
-            currentSessionId++; // 이전 백그라운드 작업 모두 종료 지시
-            const sessionId = currentSessionId; // 현재 세션 기록
+            currentSessionId++; 
+            const sessionId = currentSessionId; 
 
             if (typeof JSZip === 'undefined') { showToast('인터넷 연결 필요'); return; }
             
@@ -1533,26 +1661,16 @@
             ui.loadingIndicator.textContent = "ZIP 처리 중...";
 
             try {
-                // 이전 백그라운드 EXIF 파싱 작업이 Session ID 변경을 감지하고 메모리를 반환할 시간을 줌 (충돌 방지)
                 await new Promise(resolve => setTimeout(resolve, 300));
-                
                 if (sessionId !== currentSessionId) return;
 
-                isZipMode = true; 
-                allFiles = []; 
-                filteredFiles = [];
-                viewedFilesSet.clear(); 
-                srcDirHandle = null;
-                
-                if (!file || !file.name) {
-                    throw new Error("유효하지 않은 파일입니다.");
-                }
+                isZipMode = true; allFiles = []; filteredFiles = []; viewedFilesSet.clear(); srcDirHandle = null;
+                if (!file || !file.name) throw new Error("유효하지 않은 파일입니다.");
 
                 loadedContextId = 'zip_' + file.name; 
                 ui.headerTitle.textContent = "📸 " + file.name; 
                 showToast('ZIP 데이터 로드 중...');
 
-                // 브라우저의 파일 스트림(메모리)를 점유하지 않도록 순수 바이너리 버퍼로 복사 후 해제
                 const arrayBuffer = await file.arrayBuffer();
                 if (sessionId !== currentSessionId) return;
                 
@@ -1570,12 +1688,10 @@
                 
                 ui.dropMsg.textContent = `ZIP 로드됨: ${file.name}`; ui.dropZone.style.display = 'flex';
                 
-                // 화면 업데이트 순서 버그 수정 (렌더링을 먼저 수행)
                 renderFileList();
                 await afterFilesLoaded();
             } catch (err) { 
                 showToast('ZIP 읽기 실패: ' + err.message); 
-                console.error('ZIP 처리 에러:', err);
             } finally {
                 if (sessionId === currentSessionId) {
                     ui.loadingIndicator.classList.add('hidden');
@@ -1584,14 +1700,12 @@
         }
 
         async function openSourceDirectory(handle = null) {
-            currentSessionId++; // 새로운 로드 세션 아이디 발급
+            currentSessionId++; 
             try {
                 if (!handle) { srcDirHandle = await window.showDirectoryPicker({ mode: 'readwrite' }); }
                 else {
                     srcDirHandle = handle;
-                    if (!(await verifyPermission(srcDirHandle, true))) {
-                        showToast('폴더 접근 권한이 거부되었습니다.', true); srcDirHandle = null; return;
-                    }
+                    if (!(await verifyPermission(srcDirHandle, true))) { showToast('폴더 접근 권한이 거부되었습니다.', true); srcDirHandle = null; return; }
                 }
                 isZipMode = false; viewedFilesSet.clear(); loadedContextId = 'dir_' + srcDirHandle.name;
                 ui.headerTitle.textContent = "📸 " + srcDirHandle.name; ui.btnOpenDest.disabled = false;
@@ -1615,7 +1729,6 @@
                     for (const f of allFiles) {
                         try { await destDirHandle.getFileHandle(f.name); f.isCopied = true; matchCount++; } catch (e) {}
                     }
-                    
                     ui.loadingIndicator.classList.add('hidden'); ui.loadingIndicator.textContent = "읽는 중...";
                     if (matchCount > 0) { renderFileList(); showToast(`대상 폴더에 이미 ${matchCount}개의 사진이 존재합니다.`); }
                     else showToast(`셀렉 폴더 설정 완료`);
@@ -1631,13 +1744,12 @@
             allFiles = []; showToast('파일 불러오는 중...');
             try {
                 for await (const entry of srcDirHandle.values()) {
-                    if (sessionId !== currentSessionId) return; // 작업 중단
+                    if (sessionId !== currentSessionId) return; 
                     if (entry.kind === 'file' && IMG_EXT_REGEX.test(entry.name.toLowerCase())) {
                         allFiles.push({ handle: entry, name: entry.name, rating: 0, label: '', xmpLoaded: false, isZip: false });
                     }
                 }
                 if (sessionId === currentSessionId) {
-                    // 화면 업데이트 순서 버그 수정 (렌더링을 먼저 수행)
                     renderFileList();
                     await afterFilesLoaded();
                 }
@@ -2011,7 +2123,7 @@
                         setSmoothTransform(false); requestAnimationFrame(() => { clampPan(); applyTransform(); });
                     } else { setSmoothTransform(false); resetTransform(); }
                     
-                    // 리모컨이 연결되어 있다면 상태 전송
+                    // 모바일로 새 이미지 상태 전송
                     syncWithRemote();
                 };
                 
@@ -2677,8 +2789,8 @@
                 else ui.sidebar.classList.add('hidden');
             });
             
-            // Firebase 원격 리모컨 연결 팝업
-            ui.btnRemoteMode.addEventListener('click', initHostRemote);
+            // WebRTC QR 팝업
+            ui.btnRemoteMode.addEventListener('click', initHostPeer);
             ui.btnCloseQr.addEventListener('click', () => ui.qrModal.classList.replace('flex', 'hidden'));
             
             ui.btnToggleNav.addEventListener('click', () => { toggleNavigator(); userClosedNav = !isNavVisible; });
