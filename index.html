@@ -35,7 +35,7 @@
         #image-wrapper:active, #ref-wrapper:active { cursor: grabbing; }
 
         /* 렌더링 최적화: 절대 좌표 중앙 배치 후 Transform 제어 */
-        #main-image, #nav-img, #loupe-img, #ref-image {
+        #main-image, #nav-img, #loupe-img, #ref-loupe-img, #ref-image {
             position: absolute; left: 50%; top: 50%;
             max-width: none; max-height: none;
             transform-origin: center center; will-change: transform; pointer-events: none;
@@ -54,7 +54,7 @@
         #nav-content { position: relative; width: 100%; height: 160px; display: block; background: #000; cursor: pointer; overflow: hidden; }
         #nav-viewport { position: absolute; border: 2px solid #ef4444; background: rgba(239, 68, 68, 0.2); box-shadow: 0 0 0 9999px rgba(0,0,0,0.5); pointer-events: none; transition: all 0.1s; }
 
-        #loupe {
+        #loupe, #ref-loupe {
             position: absolute; width: 250px; height: 250px; border-radius: 50%;
             border: 3px solid rgba(255, 255, 255, 0.8); box-shadow: 0 0 15px rgba(0,0,0,0.5);
             background-repeat: no-repeat; pointer-events: none; display: none; z-index: 50; background-color: #1a1a1a; overflow: hidden;
@@ -224,6 +224,9 @@
             <div id="viewer-container" class="absolute inset-0 z-10 flex" style="display: none;">
                 <div id="ref-wrapper" class="relative flex-1 border-r border-gray-700 hidden overflow-hidden cursor-grab bg-black/50 transition-all">
                     <img id="ref-image" class="smooth-transform absolute left-1/2 top-1/2 max-w-none max-h-none origin-center pointer-events-none hidden" src="" alt="">
+                    <div id="ref-loupe">
+                        <img id="ref-loupe-img" src="">
+                    </div>
                     <div id="ref-empty-msg" class="absolute inset-0 flex flex-col items-center justify-center text-gray-500 pointer-events-none text-sm font-bold space-y-3 p-4 text-center">
                         <svg class="w-12 h-12 text-gray-600 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2"></path></svg>
                         <span>[비교 모드]<br>우측 파일 목록에서 사진을 이 영역으로<br>드래그 앤 드롭 하세요</span>
@@ -559,7 +562,7 @@
 
         let isCompareMode = false;
         let refZoomMulti = 1, refPanX = 0, refPanY = 0;
-        let isRefDragging = false, refStartX = 0, refStartY = 0;
+        let isRefDragging = false, isRefClick = false, refStartX = 0, refStartY = 0;
         let refTransformState = { rotate: 0, flipX: 1, flipY: 1 };
         let currentRefObjectUrl = null, refAnimationFrameId = null;
         
@@ -619,6 +622,7 @@
             viewerContainer: document.getElementById('viewer-container'),
             imageWrapper: document.getElementById('image-wrapper'), mainImage: document.getElementById('main-image'), loupeImg: document.getElementById('loupe-img'),
             refWrapper: document.getElementById('ref-wrapper'), refImage: document.getElementById('ref-image'), refEmptyMsg: document.getElementById('ref-empty-msg'), refDropOverlay: document.getElementById('ref-drop-overlay'),
+            refLoupe: document.getElementById('ref-loupe'), refLoupeImg: document.getElementById('ref-loupe-img'),
             zoomSelect: document.getElementById('zoom-select'), bgColorPicker: document.getElementById('bg-color-picker'),
             loupe: document.getElementById('loupe'), navPanel: document.getElementById('navigator-panel'),
             navContent: document.getElementById('nav-content'), navImg: document.getElementById('nav-img'), navViewport: document.getElementById('nav-viewport'), navHeader: document.getElementById('nav-header'), btnCloseNav: document.getElementById('btn-close-nav'),
@@ -784,6 +788,7 @@
         function showScreensaver() {
             if (isScreensaverActive) return;
             isScreensaverActive = true;
+            window.manualSsTime = Date.now(); // 수동 켬 기록
             const ss = document.getElementById('screensaver');
             ss.classList.remove('pointer-events-none');
             ss.style.opacity = '1';
@@ -810,10 +815,19 @@
             if (timeEl) timeEl.textContent = timeStr;
         }
 
-        function resetIdleTimer() {
+        function resetIdleTimer(e) {
+            // 단축키로 스크린 세이버를 켰을 때 발생하는 이벤트 무시
+            if (e && e.type === 'keydown' && !isBindingKey && e.key.toLowerCase() === userShortcuts.screensaver) {
+                return;
+            }
+            // 스크린 세이버가 켜진 직후 미세한 흔들림 등으로 인해 바로 꺼지는 현상 방지 (0.5초 딜레이)
+            if (isScreensaverActive && window.manualSsTime && (Date.now() - window.manualSsTime < 500)) {
+                return;
+            }
+            
             if (isScreensaverActive) hideScreensaver();
             if (idleTimer) clearTimeout(idleTimer);
-            idleTimer = setTimeout(showScreensaver, 15000);
+            idleTimer = setTimeout(showScreensaver, IDLE_TIMEOUT); // 30초 대기
         }
 
         function setSmoothTransform(enable) {
@@ -2213,7 +2227,10 @@
                     if (refZoomMulti === 1) resetRefTransform(); else { clampRefPan(); applyRefTransform(); }
                 };
                 
-                if (currentRefObjectUrl) ui.refImage.src = currentRefObjectUrl;
+                if (currentRefObjectUrl) {
+                    ui.refImage.src = currentRefObjectUrl;
+                    ui.refLoupeImg.src = currentRefObjectUrl;
+                }
                 else { ui.refEmptyMsg.classList.remove('hidden'); ui.refEmptyMsg.textContent = "미리보기를 불러올 수 없습니다."; }
             } catch (error) { 
                 console.error(error); ui.refEmptyMsg.classList.remove('hidden'); ui.refEmptyMsg.textContent = "이미지를 불러올 수 없습니다.";
@@ -2228,7 +2245,7 @@
 
         function clearDisplay() {
             ui.mainImage.src = ''; ui.navImg.src = ''; ui.loupeImg.src = ''; ui.fileName.textContent = '파일 없음';
-            ui.refImage.src = ''; ui.refImage.classList.add('hidden'); ui.refEmptyMsg.classList.remove('hidden');
+            ui.refImage.src = ''; ui.refLoupeImg.src = ''; ui.refImage.classList.add('hidden'); ui.refEmptyMsg.classList.remove('hidden');
             currentIndex = -1; ui.dropZone.style.display = 'flex'; ui.viewerContainer.style.display = 'none';
             ui.sidebar.classList.add('hidden'); allFiles = []; filteredFiles = []; ui.fileList.innerHTML = '';
             ui.errorMsg.classList.add('hidden');
@@ -2335,6 +2352,13 @@
 
         function handleRefWheelZoom(e) {
             e.preventDefault();
+            if (isLoupeActive && currentRefObjectUrl) {
+                const delta = -e.deltaY; let lFactor = 1.1;
+                if (loupeRelativeScale < 3.0) lFactor = 1.05; else if (loupeRelativeScale > 8.0) lFactor = 1.15;
+                const factor = delta > 0 ? lFactor : (1 / lFactor);
+                loupeRelativeScale *= factor; loupeRelativeScale = Math.max(0.5, Math.min(loupeRelativeScale, 15)); 
+                updateRefLoupe(e); return;
+            }
             if (!currentRefObjectUrl) return;
             ui.refImage.classList.remove('smooth-transform');
             
@@ -2358,8 +2382,8 @@
         }
 
         function startRefDrag(e) {
-            if (e.button !== 0 || !currentRefObjectUrl) return; 
-            isRefDragging = true; refStartX = e.clientX - refPanX; refStartY = e.clientY - refPanY;
+            if (e.button !== 0 || isLoupeActive || !currentRefObjectUrl) return; 
+            isRefDragging = true; isRefClick = true; refStartX = e.clientX - refPanX; refStartY = e.clientY - refPanY;
             ui.refImage.classList.remove('smooth-transform');
             if (ui.refWrapper.setPointerCapture) ui.refWrapper.setPointerCapture(e.pointerId);
         }
@@ -2378,6 +2402,7 @@
             }
             if (isRefDragging) {
                 e.preventDefault();
+                if (Math.abs((e.clientX - refPanX) - refStartX) > 3 || Math.abs((e.clientY - refPanY) - refStartY) > 3) isRefClick = false;
                 refPanX = e.clientX - refStartX; 
                 refPanY = e.clientY - refStartY; 
                 clampRefPan();
@@ -2395,7 +2420,7 @@
             }
             if (isRefDragging) {
                 isRefDragging = false; if (refAnimationFrameId) cancelAnimationFrame(refAnimationFrameId);
-                clampRefPan(); applyRefTransform();
+                if (isRefClick && e.button === 0) handleRefLeftClickZoom(e); else { clampRefPan(); applyRefTransform(); }
             }
         }
 
@@ -2418,6 +2443,27 @@
                 zoomMulti = targetMulti; viewMode = 'custom'; 
                 if (!isNavVisible && !userClosedNav) toggleNavigator(true);
                 updateZoomUI();
+            }
+        }
+
+        function handleRefLeftClickZoom(e) {
+            if (isLoupeActive || !currentRefObjectUrl) return;
+            setSmoothTransform(true);
+            
+            if (refZoomMulti > 1.0) { refZoomMulti = 1; resetRefTransform(); } 
+            else {
+                const rect = ui.refWrapper.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left; const mouseY = e.clientY - rect.top;
+                
+                const currentScale = 1;
+                const targetMulti = lastCustomZoomMulti > 1.05 ? lastCustomZoomMulti : 2.5;
+                const offsetX = mouseX - rect.width / 2; const offsetY = mouseY - rect.height / 2;
+                
+                refPanX = -offsetX * targetMulti; 
+                refPanY = -offsetY * targetMulti;
+                
+                refZoomMulti = targetMulti; 
+                applyRefTransform();
             }
         }
 
@@ -2539,10 +2585,17 @@
             ui.loupe.style.display = active && filteredFiles.length > 0 ? 'block' : 'none';
             ui.mainImage.style.opacity = active ? '0.5' : '1';
             
+            ui.refLoupe.style.display = active && isCompareMode && currentRefObjectUrl ? 'block' : 'none';
+            ui.refImage.style.opacity = active ? '0.5' : '1';
+            
             if (active) {
                 ui.imageWrapper.classList.add('loupe-active');
+                ui.refWrapper.classList.add('loupe-active');
                 loupeRelativeScale = Math.max(1.5, loupeRelativeScale);
-            } else ui.imageWrapper.classList.remove('loupe-active');
+            } else {
+                ui.imageWrapper.classList.remove('loupe-active');
+                ui.refWrapper.classList.remove('loupe-active');
+            }
         }
 
         function updateLoupe(e) {
@@ -2559,6 +2612,22 @@
             
             const lPanX = (panX - dx) * ratio; const lPanY = (panY - dy) * ratio;
             ui.loupeImg.style.transform = `translate(calc(-50% + ${lPanX}px), calc(-50% + ${lPanY}px)) scale(${lScale}) rotate(${transformState.rotate}deg) scaleX(${transformState.flipX}) scaleY(${transformState.flipY})`;
+        }
+
+        function updateRefLoupe(e) {
+            if (!isLoupeActive || !currentRefObjectUrl || !isCompareMode) return;
+            const wRect = ui.refWrapper.getBoundingClientRect();
+            const mouseX = e.clientX - wRect.left; const mouseY = e.clientY - wRect.top;
+            
+            ui.refLoupe.style.left = `${mouseX - 125}px`; ui.refLoupe.style.top = `${mouseY - 125}px`;
+
+            const baseScale = getRefBaseScale(); const renderScale = baseScale * refZoomMulti;
+            const lScale = baseScale * refZoomMulti * loupeRelativeScale;
+            const dx = mouseX - wRect.width/2; const dy = mouseY - wRect.height/2;
+            const ratio = lScale / renderScale;
+            
+            const lPanX = (refPanX - dx) * ratio; const lPanY = (refPanY - dy) * ratio;
+            ui.refLoupeImg.style.transform = `translate(calc(-50% + ${lPanX}px), calc(-50% + ${lPanY}px)) scale(${lScale}) rotate(${refTransformState.rotate}deg) scaleX(${refTransformState.flipX}) scaleY(${refTransformState.flipY})`;
         }
 
         async function updateMetadata(rating, label) {
@@ -2910,6 +2979,7 @@
 
             ui.refWrapper.addEventListener('wheel', handleRefWheelZoom, { passive: false });
             ui.refWrapper.addEventListener('pointerdown', startRefDrag);
+            ui.refWrapper.addEventListener('pointermove', updateRefLoupe);
 
             window.addEventListener('pointermove', drag, { passive: false });
             window.addEventListener('pointerup', endDrag);
