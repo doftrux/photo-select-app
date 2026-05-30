@@ -202,7 +202,7 @@
 
             <div class="flex items-center space-x-1 sm:space-x-2 bg-gray-800 p-1 sm:px-3 sm:py-1.5 rounded border border-gray-700 shrink-0" title="배경색 변경">
                 <span class="text-xs text-gray-400 mr-1 hidden lg:inline">배경</span>
-                <!-- 모바일에서는 공간 확보를 위해 프리셋 숨김 -->
+                <!-- 모바일에서는 공간 확보 위해 텍스트 숨김 -->
                 <div class="hidden sm:flex items-center space-x-1">
                     <button class="w-4 h-4 rounded-full bg-black border border-gray-600 hover:scale-125 transition-transform" data-bg="#000000" title="검은색"></button>
                     <button class="w-4 h-4 rounded-full bg-[#222222] border border-gray-500 hover:scale-125 transition-transform" data-bg="#222222" title="짙은 회색"></button>
@@ -219,7 +219,7 @@
                 <button id="btn-toggle-nav" class="text-gray-400 hover:text-white focus:outline-none p-1 sm:px-2 sm:py-1 rounded hover:bg-gray-700 transition" title="네비게이션 켜기/끄기 (N)">
                     <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"></path></svg>
                 </button>
-                <button id="btn-fullscreen" class="text-gray-400 hover:text-white focus:outline-none p-1 sm:px-2 sm:py-1 rounded hover:bg-gray-700 transition" title="전체화면 (F11)">
+                <button id="btn-fullscreen" class="text-gray-400 hover:text-white focus:outline-none p-1 sm:px-2 sm:py-1 rounded hover:bg-gray-700 transition" title="전체화면 토글">
                     <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path></svg>
                 </button>
             </div>
@@ -229,9 +229,9 @@
                 <span class="hidden sm:inline">목록</span>
             </button>
 
-            <button id="btn-shortcuts" class="p-1 sm:px-3 sm:py-1.5 text-[10px] sm:text-sm font-medium text-gray-400 border border-gray-600 rounded hover:text-white hover:border-gray-400 transition-colors shrink-0" title="단축키(H)">
-                <svg class="w-4 h-4 block sm:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
-                <span class="hidden sm:inline">단축키 (<span id="btn-shortcuts-key">H</span>)</span>
+            <button id="btn-shortcuts" class="p-1 sm:px-3 sm:py-1.5 text-[10px] sm:text-sm font-medium text-gray-400 border border-gray-600 rounded hover:text-white hover:border-gray-400 transition-colors shrink-0" title="단축키 및 설정">
+                <svg class="w-4 h-4 block sm:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                <span class="hidden sm:inline">설정 (<span id="btn-shortcuts-key">H</span>)</span>
             </button>
         </div>
     </header>
@@ -450,15 +450,29 @@
     <!-- 토스트 메시지 -->
     <div id="toast">메시지</div>
 
-    <!-- 단축키 모달 -->
+    <!-- 단축키 설정 및 캐시 관리 모달 -->
     <div id="shortcuts-modal" class="fixed inset-0 z-50 items-center justify-center hidden">
         <div class="bg-gray-800 border border-gray-700 rounded-lg p-6 max-w-md w-full shadow-2xl flex flex-col max-h-[90vh]">
             <div class="flex justify-between items-center mb-4 shrink-0">
-                <h2 class="text-xl font-bold text-white">단축키 설정</h2>
+                <h2 class="text-xl font-bold text-white">설정 및 단축키</h2>
                 <button id="btn-close-modal" class="text-gray-400 hover:text-white focus:outline-none"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"></path></svg></button>
             </div>
+            
             <div class="space-y-1 text-sm text-gray-300 overflow-y-auto custom-scrollbar pr-2 flex-1" id="shortcuts-list">
             </div>
+            
+            <!-- 저장소(캐시) 관리 섹션 -->
+            <div class="mt-4 pt-4 border-t border-gray-700 shrink-0">
+                <div class="flex justify-between items-center mb-1.5">
+                    <span class="text-sm font-bold text-gray-300">앱 캐시 용량 관리</span>
+                    <span id="storage-usage" class="text-xs text-blue-400 font-mono font-bold">계산 중...</span>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-[10px] text-gray-500 leading-tight flex-1 mr-4">ZIP 파일 해제 및 열람 기록으로 쌓인 브라우저 캐시 용량을 비웁니다. (단축키 등 기본 설정은 유지됨)</span>
+                    <button id="btn-clear-cache" class="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded shadow-md transition-colors shrink-0">캐시 삭제</button>
+                </div>
+            </div>
+
             <div class="mt-4 pt-4 border-t border-gray-700 flex justify-between items-center shrink-0">
                 <button id="btn-reset-shortcuts" class="text-sm text-blue-400 hover:text-blue-300 focus:outline-none">기본값 복원</button>
                 <div class="text-xs text-yellow-500 text-right">클라우드에 자동 저장됩니다.</div>
@@ -581,7 +595,8 @@
             rotRight: 'arrowup', rotLeft: 'arrowdown',
             rate1: '1', rate2: '2', rate3: '3', rate4: '4', rate5: '5', rate0: '0',
             labelRed: '6', labelYellow: '7', labelGreen: '8', labelBlue: '9', labelPurple: 't',
-            move: 'enter', modal: 'h'
+            move: 'enter', modal: 'h',
+            fullScreenAndSaver: 'f11'
         };
         let userShortcuts = { ...defaultShortcuts };
         let isBindingKey = false, bindingAction = null;
@@ -742,6 +757,58 @@
                 }
             } catch(e) { console.error(e); }
         }
+        
+        // --- 브라우저 저장소 (캐시) 관리 함수 ---
+        async function updateStorageUsage() {
+            const usageEl = document.getElementById('storage-usage');
+            if (!usageEl) return;
+            
+            let totalBytes = 0;
+            // LocalStorage 용량 계산
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                const value = localStorage.getItem(key);
+                totalBytes += (key.length + value.length) * 2;
+            }
+            
+            // Cache API 용량 계산
+            if (navigator.storage && navigator.storage.estimate) {
+                try {
+                    const estimate = await navigator.storage.estimate();
+                    totalBytes += estimate.usage || 0;
+                } catch(e) {}
+            }
+            
+            const mb = (totalBytes / (1024 * 1024)).toFixed(2);
+            usageEl.textContent = `${mb} MB 사용 중`;
+        }
+
+        // 캐시 삭제 (초기화 시 바인딩)
+        document.getElementById('btn-clear-cache').addEventListener('click', async () => {
+            if (!confirm('단축키 및 테마 설정을 제외한 열람 기록 및 앱 캐시를 모두 삭제하시겠습니까?')) return;
+            
+            const keysToRemove = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith('photoCulling_viewed_')) {
+                    keysToRemove.push(key);
+                }
+            }
+            keysToRemove.forEach(k => localStorage.removeItem(k));
+            viewedFilesSet.clear();
+
+            if ('caches' in window) {
+                try {
+                    const cacheNames = await caches.keys();
+                    await Promise.all(cacheNames.map(name => caches.delete(name)));
+                } catch(e) {}
+            }
+            
+            showToast('캐시가 성공적으로 삭제되었습니다.');
+            updateStorageUsage();
+            updateDashboard();
+            renderFileList();
+        });
 
         // --- 스크린 세이버 함수 ---
         function showScreensaver() {
@@ -863,7 +930,7 @@
             return false;
         }
 
-        // --- 복구된 누락 함수들 (단축키, 모드 토글, 드래그앤드롭 등) ---
+        // --- 단축키 설정 부분 ---
         function loadShortcuts() {
             const saved = localStorage.getItem('photoCullingShortcuts_v6');
             if (saved) { try { userShortcuts = { ...defaultShortcuts, ...JSON.parse(saved) }; } catch(e) {} }
@@ -887,7 +954,7 @@
             if (!list) return;
             list.innerHTML = '';
             const categories = {
-                '이동 및 화면': { prev: '이전 사진', next: '다음 사진', zoomIn: '화면 확대 (+)', zoomOut: '화면 축소 (-)', loupe: '부분 확대 유지', nav: '네비게이션 켜기/끄기', rotRight: '오른쪽 회전', rotLeft: '왼쪽 회전' },
+                '이동 및 화면': { prev: '이전 사진', next: '다음 사진', zoomIn: '화면 확대 (+)', zoomOut: '화면 축소 (-)', loupe: '부분 확대 유지', nav: '네비게이션 켜기/끄기', rotRight: '오른쪽 회전', rotLeft: '왼쪽 회전', fullScreenAndSaver: '전체화면 / 스크린 세이버' },
                 '별점 및 라벨': { rate1: '별점 1', rate2: '별점 2', rate3: '별점 3', rate4: '별점 4', rate5: '별점 5', rate0: '등급 초기화', labelRed: '빨강 라벨 (토글)', labelYellow: '노랑 라벨 (토글)', labelGreen: '초록 라벨 (토글)', labelBlue: '파랑 라벨 (토글)', labelPurple: '보라 라벨 (토글)' },
                 '작업': { move: '선택 파일 셀렉(토글)', modal: '단축키 창 열기/닫기' }
             };
@@ -939,8 +1006,8 @@
             
             if (e.shiftKey && key === 'r') { e.preventDefault(); toggleCompareMode(); return; }
 
-            // 전체화면에서 f11을 누를 경우 스크린 세이버 동작
-            if (key === 'f11') { 
+            // 스크린 세이버 및 전체화면 사용자 지정 단축키 반영
+            if (key === userShortcuts.fullScreenAndSaver) { 
                 e.preventDefault(); 
                 if (document.body.classList.contains('fullscreen-mode')) {
                     showScreensaver();
@@ -951,7 +1018,7 @@
             }
             
             if (key === 'escape') { ui.modal.classList.add('hidden'); return; }
-            if (key === userShortcuts.modal) { ui.modal.classList.toggle('hidden'); return; }
+            if (key === userShortcuts.modal) { ui.modal.classList.toggle('hidden'); if(!ui.modal.classList.contains('hidden')) updateStorageUsage(); return; }
             if (filteredFiles.length === 0) return;
 
             if (key === userShortcuts.prev) navigate(-1);
@@ -1002,18 +1069,11 @@
         }
 
         function toggleFullscreen() {
-            const isFull = document.body.classList.contains('fullscreen-mode');
-            if (!isFull) {
+            if (!document.fullscreenElement) {
                 if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(()=>{});
-                document.body.classList.add('fullscreen-mode');
             } else {
-                if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(()=>{});
-                document.body.classList.remove('fullscreen-mode');
+                if (document.exitFullscreen) document.exitFullscreen().catch(()=>{});
             }
-            setTimeout(() => { 
-                setSmoothTransform(false); clampPan(); applyTransform(); 
-                if(isCompareMode && currentRefObjectUrl) { clampRefPan(); applyRefTransform(); }
-            }, 300);
         }
 
         function setupFullscreenHover() {
@@ -1247,11 +1307,16 @@
         
         // --- 모바일 리모컨 모드 초기화 (URL 접속 시) ---
         function initRemoteMode(hostId) {
-            // 기존 PC UI 전부 삭제/숨김 처리
-            document.body.innerHTML = ''; 
+            // PC용 기존 UI를 지우지 않고 안전하게 숨김 처리
             const remoteView = document.getElementById('remote-view');
-            document.body.appendChild(remoteView);
-            remoteView.classList.replace('hidden', 'flex');
+            Array.from(document.body.children).forEach(child => {
+                if (child.id !== 'remote-view' && child.id !== 'toast' && child.tagName !== 'SCRIPT') {
+                    child.style.display = 'none';
+                }
+            });
+            
+            remoteView.classList.remove('hidden');
+            remoteView.classList.add('flex');
             
             const statusEl = document.getElementById('remote-status');
             const imgEl = document.getElementById('remote-img');
@@ -1373,6 +1438,10 @@
             if (typeof JSZip === 'undefined') { showToast('인터넷 연결 필요'); return; }
             isZipMode = true; allFiles = []; viewedFilesSet.clear(); srcDirHandle = null;
             loadedContextId = 'zip_' + file.name; ui.headerTitle.textContent = "📸 " + file.name; showToast('ZIP 압축 해제 중...');
+            
+            ui.loadingIndicator.classList.remove('hidden');
+            ui.loadingIndicator.textContent = "ZIP 처리 중...";
+
             try {
                 const zip = await JSZip.loadAsync(file);
                 zip.forEach((path, entry) => {
@@ -1381,8 +1450,15 @@
                     }
                 });
                 ui.dropMsg.textContent = `ZIP 로드됨: ${file.name}`; ui.dropZone.style.display = 'flex';
+                
+                // 딜레이 해결을 위해 await 추가
                 await afterFilesLoaded();
-            } catch (err) { showToast('ZIP 읽기 실패'); }
+            } catch (err) { 
+                showToast('ZIP 읽기 실패'); 
+                console.error(err);
+            } finally {
+                ui.loadingIndicator.classList.add('hidden');
+            }
         }
 
         async function openSourceDirectory(handle = null) {
@@ -1454,7 +1530,11 @@
                 else ui.sidebar.classList.add('hidden');
                 
                 currentIndex = 0; selectedIndices.clear(); selectedIndices.add(currentIndex); lastSelectedIndex = currentIndex;
-                displayCurrentImage(); renderFileList(); updateDashboard();
+                
+                // 첫 이미지 로드를 명시적으로 기다려 ZIP 딜레이 해결
+                await displayCurrentImage(); 
+                
+                renderFileList(); updateDashboard();
                 if (!isZipMode) loadAllMetadataInBackground();
             } else { showToast('지원되는 이미지가 없습니다.'); clearDisplay(); }
         }
@@ -2549,7 +2629,10 @@
             setupFullscreenHover();
             setupNavigatorDrag();
 
-            ui.btnShortcuts.addEventListener('click', () => ui.modal.classList.remove('hidden'));
+            ui.btnShortcuts.addEventListener('click', () => {
+                ui.modal.classList.remove('hidden');
+                updateStorageUsage(); // 모달 열릴 때 캐시 용량 계산
+            });
             ui.btnCloseModal.addEventListener('click', () => { ui.modal.classList.add('hidden'); cancelBinding(); });
             ui.modal.addEventListener('click', (e) => { if (e.target === ui.modal) { ui.modal.classList.add('hidden'); cancelBinding(); } });
             ui.btnResetShortcuts.addEventListener('click', () => { userShortcuts = { ...defaultShortcuts }; saveSettingsToCloud(); renderShortcutsList(); showToast('단축키가 기본값으로 초기화되었습니다.'); });
