@@ -503,7 +503,7 @@
             </div>
         </div>
 
-        <!-- Image Area -->
+        <!-- Image Area (제스처 동작 영역) -->
         <div id="remote-img-container" class="flex-1 w-full h-full relative overflow-hidden flex items-center justify-center touch-none">
             <img id="remote-img" class="absolute left-1/2 top-1/2 pointer-events-none" style="transform: translate(-50%, -50%) scale(1); max-width: none; max-height: none;" src="" alt="" />
             <div id="remote-swipe-overlay" class="absolute inset-0 z-10 flex items-center justify-center opacity-0 transition-opacity pointer-events-none">
@@ -1318,11 +1318,11 @@
         function syncWithRemote() {
             if (!remoteConn || !remoteConn.open || !ui.mainImage.src || ui.mainImage.src.startsWith('null') || filteredFiles.length === 0) return;
             
-            // 모바일 전송용 썸네일 생성 (데이터 절약을 위해 최대 1000px로 제한 및 압축률 최적화)
+            // 모바일 전송용 썸네일 생성 (데이터 절약을 위해 최대 800px로 제한 및 압축률 최적화)
             try {
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
-                const MAX_SIZE = 1000; 
+                const MAX_SIZE = 800; 
                 
                 let w = ui.mainImage.naturalWidth;
                 let h = ui.mainImage.naturalHeight;
@@ -1351,21 +1351,24 @@
                     ctx.drawImage(ui.mainImage, -w/2, -h/2, w, h);
                 }
                 
-                // 전송 속도 최적화: 압축률 60% 데이터 전송 (끊김 방지)
-                const dataUrl = canvas.toDataURL('image/jpeg', 0.6); 
-                const fileObj = filteredFiles[currentIndex];
-                
-                try {
-                    remoteConn.send({ 
-                        type: 'state', 
-                        data: dataUrl, 
-                        fileName: fileObj.name, 
-                        currentIndex, 
-                        total: filteredFiles.length 
-                    });
-                } catch(sendErr) {
-                    console.error('리모컨 데이터 채널 전송 실패', sendErr);
-                }
+                // 전송 속도 최적화: 압축률 60% 바이너리 Blob 전송 (끊김 및 버그 완벽 방지)
+                canvas.toBlob(async (blob) => {
+                    if (blob && remoteConn && remoteConn.open) {
+                        try {
+                            const arrayBuffer = await blob.arrayBuffer();
+                            const fileObj = filteredFiles[currentIndex];
+                            remoteConn.send({ 
+                                type: 'state', 
+                                data: arrayBuffer, 
+                                fileName: fileObj.name, 
+                                currentIndex, 
+                                total: filteredFiles.length 
+                            });
+                        } catch(sendErr) {
+                            console.error('리모컨 데이터 채널 전송 실패', sendErr);
+                        }
+                    }
+                }, 'image/jpeg', 0.6);
             } catch (e) {
                 console.error('리모컨 썸네일 생성 에러', e);
             }
@@ -1435,6 +1438,124 @@
             
             window.addEventListener('resize', updateRemoteScale);
 
+            // PeerJS 연결과 상관 없이 버튼 이벤트와 제스처 이벤트 리스너를 최우선으로 등록
+            let conn;
+            const sendAction = (action, params = {}) => {
+                if (conn && conn.open) conn.send({ action, ...params });
+            };
+
+            document.getElementById('btn-remote-prev').addEventListener('click', (e) => { e.stopPropagation(); sendAction('prev'); showSwipeEffect('이전'); });
+            document.getElementById('btn-remote-next').addEventListener('click', (e) => { e.stopPropagation(); sendAction('next'); showSwipeEffect('다음'); });
+            document.getElementById('btn-remote-list').addEventListener('click', (e) => {
+                e.stopPropagation();
+                sendAction('requestList');
+                document.getElementById('remote-list-overlay').classList.remove('hidden');
+                document.getElementById('remote-list-overlay').classList.add('flex');
+            });
+            document.getElementById('btn-remote-list-close').addEventListener('click', (e) => {
+                e.stopPropagation();
+                document.getElementById('remote-list-overlay').classList.add('hidden');
+                document.getElementById('remote-list-overlay').classList.remove('flex');
+            });
+            document.getElementById('btn-remote-fit').addEventListener('click', (e) => {
+                e.stopPropagation();
+                remoteViewMode = 'fit'; remoteScale = 1; remotePanX = 0; remotePanY = 0; updateRemoteScale();
+                document.getElementById('btn-remote-fit').classList.replace('bg-gray-700', 'bg-blue-600');
+                document.getElementById('btn-remote-width').classList.replace('bg-blue-600', 'bg-gray-700');
+            });
+            document.getElementById('btn-remote-width').addEventListener('click', (e) => {
+                e.stopPropagation();
+                remoteViewMode = 'width'; remoteScale = 1; remotePanX = 0; remotePanY = 0; updateRemoteScale();
+                document.getElementById('btn-remote-width').classList.replace('bg-gray-700', 'bg-blue-600');
+                document.getElementById('btn-remote-fit').classList.replace('bg-blue-600', 'bg-gray-700');
+            });
+            document.getElementById('btn-remote-help').addEventListener('click', (e) => {
+                e.stopPropagation();
+                document.getElementById('remote-help-overlay').classList.remove('hidden');
+                document.getElementById('remote-help-overlay').classList.add('flex');
+            });
+            document.getElementById('btn-remote-help-close').addEventListener('click', (e) => {
+                e.stopPropagation();
+                document.getElementById('remote-help-overlay').classList.add('hidden');
+                document.getElementById('remote-help-overlay').classList.remove('flex');
+            });
+
+            // 제스처 이벤트
+            let startX = 0, startY = 0;
+            let isSwiping = false;
+
+            container.addEventListener('touchstart', e => {
+                if (e.target.closest('button')) return;
+
+                if (e.touches.length === 1) {
+                    startX = e.touches[0].clientX;
+                    startY = e.touches[0].clientY;
+                    isSwiping = true;
+                } else if (e.touches.length === 2) {
+                    isSwiping = false;
+                    initialDistance = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+                    initialScale = remoteScale;
+                }
+                
+                tapCount++;
+                if (tapCount === 1) {
+                    tapTimer = setTimeout(() => { tapCount = 0; }, 300); 
+                } else if (tapCount === 2) {
+                    clearTimeout(tapTimer);
+                    tapTimer = setTimeout(() => { 
+                        remoteScale = 1; remotePanX = 0; remotePanY = 0; remoteViewMode = 'fit';
+                        updateRemoteScale();
+                        document.getElementById('btn-remote-fit').className = "px-2 py-1.5 bg-blue-600 rounded text-[10px] font-bold transition-colors";
+                        document.getElementById('btn-remote-width').className = "px-2 py-1.5 bg-gray-700 rounded text-[10px] font-bold transition-colors";
+                        tapCount = 0; 
+                    }, 300);
+                } else if (tapCount === 3) {
+                    clearTimeout(tapTimer);
+                    tapCount = 0;
+                    toggleMobileFullscreen();
+                }
+            }, {passive: false});
+
+            container.addEventListener('touchmove', e => {
+                if (e.target.closest('button')) return;
+                e.preventDefault(); 
+                
+                if(e.touches.length === 1 && isSwiping) {
+                    const dx = e.touches[0].clientX - startX;
+                    const dy = e.touches[0].clientY - startY;
+                    
+                    if (remoteScale > 1.05 || remoteViewMode === 'width') {
+                        remotePanX = lastPanX + dx;
+                        remotePanY = lastPanY + dy;
+                        applyRemoteTransform();
+                    }
+                } else if (e.touches.length === 2) {
+                    const currentDistance = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+                    remoteScale = initialScale * (currentDistance / initialDistance);
+                    remoteScale = Math.max(0.5, Math.min(remoteScale, 10));
+                    applyRemoteTransform();
+                }
+            }, {passive: false});
+
+            container.addEventListener('touchend', e => {
+                if (e.target.closest('button')) return;
+                
+                if(isSwiping && e.changedTouches.length === 1) {
+                    const dx = e.changedTouches[0].clientX - startX;
+                    if (remoteScale <= 1.05 && remoteViewMode === 'fit') {
+                        if (dx > 50) { sendAction('prev'); showSwipeEffect('이전'); }
+                        else if (dx < -50) { sendAction('next'); showSwipeEffect('다음'); }
+                    } else {
+                        lastPanX = remotePanX;
+                        lastPanY = remotePanY;
+                    }
+                } else {
+                    lastPanX = remotePanX;
+                    lastPanY = remotePanY;
+                }
+                isSwiping = false;
+            });
+
             // PeerJS 초기화 및 연결
             try {
                 const peer = new Peer({
@@ -1446,130 +1567,7 @@
                         ]
                     }
                 });
-                
-                let conn;
-                
-                const sendAction = (action, params = {}) => {
-                    if (conn && conn.open) conn.send({ action, ...params });
-                };
 
-                // 연결과 상관없이 버튼 및 제스처 이벤트 리스너 최우선 등록 (먹통 방지)
-                document.getElementById('btn-remote-prev').addEventListener('click', (e) => { e.stopPropagation(); sendAction('prev'); showSwipeEffect('이전'); });
-                document.getElementById('btn-remote-next').addEventListener('click', (e) => { e.stopPropagation(); sendAction('next'); showSwipeEffect('다음'); });
-                document.getElementById('btn-remote-list').addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    sendAction('requestList');
-                    document.getElementById('remote-list-overlay').classList.remove('hidden');
-                    document.getElementById('remote-list-overlay').classList.add('flex');
-                });
-                document.getElementById('btn-remote-list-close').addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    document.getElementById('remote-list-overlay').classList.add('hidden');
-                    document.getElementById('remote-list-overlay').classList.remove('flex');
-                });
-                document.getElementById('btn-remote-fit').addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    remoteViewMode = 'fit'; remoteScale = 1; remotePanX = 0; remotePanY = 0; updateRemoteScale();
-                    document.getElementById('btn-remote-fit').classList.replace('bg-gray-700', 'bg-blue-600');
-                    document.getElementById('btn-remote-width').classList.replace('bg-blue-600', 'bg-gray-700');
-                });
-                document.getElementById('btn-remote-width').addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    remoteViewMode = 'width'; remoteScale = 1; remotePanX = 0; remotePanY = 0; updateRemoteScale();
-                    document.getElementById('btn-remote-width').classList.replace('bg-gray-700', 'bg-blue-600');
-                    document.getElementById('btn-remote-fit').classList.replace('bg-blue-600', 'bg-gray-700');
-                });
-                document.getElementById('btn-remote-help').addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    document.getElementById('remote-help-overlay').classList.remove('hidden');
-                    document.getElementById('remote-help-overlay').classList.add('flex');
-                });
-                document.getElementById('btn-remote-help-close').addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    document.getElementById('remote-help-overlay').classList.add('hidden');
-                    document.getElementById('remote-help-overlay').classList.remove('flex');
-                });
-
-                // 제스처 기반 터치 이벤트 처리 (container 영역만)
-                let startX = 0, startY = 0;
-                let isSwiping = false;
-
-                container.addEventListener('touchstart', e => {
-                    // 버튼 위에서 터치한 경우 제스처 무시 (클릭 작동 보장)
-                    if (e.target.closest('button')) return;
-
-                    if (e.touches.length === 1) {
-                        startX = e.touches[0].clientX;
-                        startY = e.touches[0].clientY;
-                        isSwiping = true;
-                    } else if (e.touches.length === 2) {
-                        isSwiping = false;
-                        initialDistance = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
-                        initialScale = remoteScale;
-                    }
-                    
-                    // 더블/트리플 탭 감지
-                    tapCount++;
-                    if (tapCount === 1) {
-                        tapTimer = setTimeout(() => { tapCount = 0; }, 300); 
-                    } else if (tapCount === 2) {
-                        clearTimeout(tapTimer);
-                        tapTimer = setTimeout(() => { 
-                            remoteScale = 1; remotePanX = 0; remotePanY = 0; remoteViewMode = 'fit';
-                            updateRemoteScale();
-                            document.getElementById('btn-remote-fit').classList.replace('bg-gray-700', 'bg-blue-600');
-                            document.getElementById('btn-remote-width').classList.replace('bg-blue-600', 'bg-gray-700');
-                            tapCount = 0; 
-                        }, 300);
-                    } else if (tapCount === 3) {
-                        clearTimeout(tapTimer);
-                        tapCount = 0;
-                        toggleMobileFullscreen();
-                    }
-                }, {passive: false});
-
-                container.addEventListener('touchmove', e => {
-                    if (e.target.closest('button')) return;
-                    e.preventDefault(); // 브라우저 스크롤 바운스 강제 차단
-                    
-                    if(e.touches.length === 1 && isSwiping) {
-                        const dx = e.touches[0].clientX - startX;
-                        const dy = e.touches[0].clientY - startY;
-                        
-                        if (remoteScale > 1.05 || remoteViewMode === 'width') {
-                            remotePanX = lastPanX + dx;
-                            remotePanY = lastPanY + dy;
-                            applyRemoteTransform();
-                        }
-                    } else if (e.touches.length === 2) {
-                        const currentDistance = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
-                        remoteScale = initialScale * (currentDistance / initialDistance);
-                        remoteScale = Math.max(0.5, Math.min(remoteScale, 10));
-                        applyRemoteTransform();
-                    }
-                }, {passive: false});
-
-                container.addEventListener('touchend', e => {
-                    if (e.target.closest('button')) return;
-                    
-                    if(isSwiping && e.changedTouches.length === 1) {
-                        const dx = e.changedTouches[0].clientX - startX;
-                        if (remoteScale <= 1.05 && remoteViewMode === 'fit') {
-                            // 스와이프로 좌우 전환 (민감도 50px로 조정)
-                            if (dx > 50) { sendAction('prev'); showSwipeEffect('이전'); }
-                            else if (dx < -50) { sendAction('next'); showSwipeEffect('다음'); }
-                        } else {
-                            lastPanX = remotePanX;
-                            lastPanY = remotePanY;
-                        }
-                    } else {
-                        lastPanX = remotePanX;
-                        lastPanY = remotePanY;
-                    }
-                    isSwiping = false;
-                });
-
-                // 통신 채널 오픈
                 peer.on('open', () => {
                     conn = peer.connect(hostId);
                     
@@ -1583,7 +1581,21 @@
                     // PC로부터 오는 데이터 처리
                     conn.on('data', data => {
                         if(data.type === 'state') {
-                            imgEl.src = data.data; 
+                            // 바이너리(ArrayBuffer)로 넘어온 데이터를 Blob(이미지)로 변환
+                            let blob;
+                            if (data.data instanceof ArrayBuffer || data.data instanceof Uint8Array) {
+                                blob = new Blob([data.data], { type: 'image/jpeg' });
+                            } else if (data.data instanceof Blob) {
+                                blob = data.data;
+                            }
+                            
+                            if (blob) {
+                                if (imgEl.src && imgEl.src.startsWith('blob:')) URL.revokeObjectURL(imgEl.src);
+                                imgEl.src = URL.createObjectURL(blob);
+                            } else if (typeof data.data === 'string') {
+                                imgEl.src = data.data; // 기존 Base64 호환성 유지
+                            }
+
                             document.getElementById('remote-filename').textContent = `${data.currentIndex + 1}/${data.total} - ${data.fileName}`;
                             remoteScale = 1; remotePanX = 0; remotePanY = 0;
                             updateRemoteScale();
@@ -1667,14 +1679,19 @@
                 ui.headerTitle.textContent = `📸 ${fileHandles.length}개의 파일 로드됨`;
                 ui.btnOpenDest.disabled = false; showToast('파일 불러오는 중...');
 
+                const sessionId = currentSessionId;
                 for (const handle of fileHandles) {
+                    if (sessionId !== currentSessionId) return; // 작업 중단
                     if (IMG_EXT_REGEX.test(handle.name.toLowerCase())) {
                         allFiles.push({ handle: handle, name: handle.name, rating: 0, label: '', xmpLoaded: false, isZip: false });
                     }
                 }
                 
-                if (allFiles.length > 0) await afterFilesLoaded();
-                else showToast('지원되는 이미지가 없습니다.');
+                if (sessionId === currentSessionId && allFiles.length > 0) {
+                    await afterFilesLoaded();
+                } else if (sessionId === currentSessionId) {
+                    showToast('지원되는 이미지가 없습니다.');
+                }
             } catch (error) {
                 if (error.name === 'NotAllowedError') showToast('접근 권한이 거부되었습니다.', true);
                 else if (error.name !== 'AbortError') showToast('열기 취소/오류', true);
@@ -1683,32 +1700,50 @@
 
         async function loadZipFile(file) {
             currentSessionId++; // 이전 백그라운드 작업 모두 종료 지시
+            const sessionId = currentSessionId; // 현재 세션 기록
+
             if (typeof JSZip === 'undefined') { showToast('인터넷 연결 필요'); return; }
             
             ui.loadingIndicator.classList.remove('hidden');
             ui.loadingIndicator.textContent = "ZIP 처리 중...";
 
             try {
-                // 이전 백그라운드 EXIF 파싱 작업이 Session ID 변경을 감지하고 메모리를 반환할 시간을 줌 (충돌 방지)
+                // EXIF 메타데이터 파싱 등 기존에 진행 중이던 비동기 백그라운드 작업이
+                // sessionId가 변경된 것을 인지하고 완전히 멈출 때까지 0.3초 대기합니다. (충돌 방지)
                 await new Promise(resolve => setTimeout(resolve, 300));
+                
+                if (sessionId !== currentSessionId) return;
 
                 isZipMode = true; 
                 allFiles = []; 
                 filteredFiles = [];
                 viewedFilesSet.clear(); 
                 srcDirHandle = null;
-                loadedContextId = 'zip_' + file.name; 
-                ui.headerTitle.textContent = "📸 " + file.name; showToast('ZIP 압축 해제 중...');
-
-                // 파일 객체를 직접 전달하여 안전하게 메모리에 로드
-                const jszip = new JSZip(); 
-                const zip = await jszip.loadAsync(file);
                 
+                if (!file || !file.name) {
+                    throw new Error("유효하지 않은 파일입니다.");
+                }
+
+                loadedContextId = 'zip_' + file.name; 
+                ui.headerTitle.textContent = "📸 " + file.name; 
+                showToast('ZIP 데이터 로드 중...');
+
+                // 브라우저의 파일 스트림(메모리)를 점유하지 않도록 순수 바이너리 버퍼로 복사 후 해제
+                const arrayBuffer = await file.arrayBuffer();
+                if (sessionId !== currentSessionId) return;
+                
+                showToast('ZIP 압축 해제 중...');
+                const jszip = new JSZip(); 
+                const zip = await jszip.loadAsync(arrayBuffer);
+                
+                if (sessionId !== currentSessionId) return;
+
                 zip.forEach((path, entry) => {
                     if (!entry.dir && IMG_EXT_REGEX.test(path)) {
                         allFiles.push({ name: path, entry: entry, rating: 0, label: '', xmpLoaded: true, isZip: true });
                     }
                 });
+                
                 ui.dropMsg.textContent = `ZIP 로드됨: ${file.name}`; ui.dropZone.style.display = 'flex';
                 
                 await afterFilesLoaded();
@@ -1716,7 +1751,9 @@
                 showToast('ZIP 읽기 실패: ' + err.message); 
                 console.error('ZIP 처리 에러:', err);
             } finally {
-                ui.loadingIndicator.classList.add('hidden');
+                if (sessionId === currentSessionId) {
+                    ui.loadingIndicator.classList.add('hidden');
+                }
             }
         }
 
@@ -1764,14 +1801,18 @@
         }
 
         async function loadFilesFromDirectory() {
+            const sessionId = currentSessionId;
             allFiles = []; showToast('파일 불러오는 중...');
             try {
                 for await (const entry of srcDirHandle.values()) {
+                    if (sessionId !== currentSessionId) return; // 작업 중단
                     if (entry.kind === 'file' && IMG_EXT_REGEX.test(entry.name.toLowerCase())) {
                         allFiles.push({ handle: entry, name: entry.name, rating: 0, label: '', xmpLoaded: false, isZip: false });
                     }
                 }
-                await afterFilesLoaded();
+                if (sessionId === currentSessionId) {
+                    await afterFilesLoaded();
+                }
             } catch (error) { showToast('읽기 오류'); }
         }
 
@@ -1967,8 +2008,12 @@
                 if (sessionId !== currentSessionId) break; // 새 세션이 시작되면 백그라운드 작업 즉시 중단
                 const chunk = allFiles.slice(i, i + chunkSize);
                 await Promise.all(chunk.map(async (file) => {
-                    if(file.xmpLoaded) return;
+                    if (!file) return;
+                    if (file.xmpLoaded) return;
                     try {
+                        if (sessionId !== currentSessionId) return; // 작업 전 다시 확인
+                        if (!file.handle || !file.name) return; // 안전 검사
+                        
                         const fileData = await file.handle.getFile();
                         if (file.name.toLowerCase().match(/\.(jpe?g)$/i)) {
                             const meta = await readXmpFromJpeg(fileData);
@@ -2092,6 +2137,8 @@
         async function displayCurrentImage() {
             if (currentIndex < 0 || currentIndex >= filteredFiles.length) return;
             const fileObj = filteredFiles[currentIndex];
+            if (!fileObj || !fileObj.name) return; // 안전 검사
+            
             ui.fileName.textContent = fileObj.name; updateListSelection();
             
             if (!viewedFilesSet.has(fileObj.name)) { viewedFilesSet.add(fileObj.name); saveViewedProgress(); }
