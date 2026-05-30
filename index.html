@@ -1633,7 +1633,7 @@
                 // PC로부터 오는 데이터(청크) 처리
                 conn.on('data', data => {
                     if (data.type === 'ping') return; // PC에서 온 ping 신호 무시
-                    if (data.type === 'state_meta') {
+                    if (data.type === 'state_start') {
                         incomingImage[data.fileId] = {
                             chunks: new Array(data.totalChunks),
                             receivedCount: 0,
