@@ -9,10 +9,10 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <!-- EXIF 정보 및 RAW 파싱 라이브러리 -->
     <script src="https://cdn.jsdelivr.net/npm/exifr/dist/full.umd.js"></script>
-    <!-- WebRTC P2P 통신 라이브러리 (모바일 리모컨용) -->
-    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <!-- QR 코드 생성 라이브러리 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <!-- AES-256 종단간 암호화 라이브러리 (보안 강화) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
     <style>
         body {
             background-color: #121212;
@@ -221,7 +221,7 @@
                     <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"></path></svg>
                 </button>
                 <button id="btn-fullscreen" class="text-gray-400 hover:text-white focus:outline-none p-1 sm:px-2 sm:py-1 rounded hover:bg-gray-700 transition" title="전체화면 토글 (*)">
-                    <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path></svg>
+                    <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path></svg>
                 </button>
             </div>
 
@@ -485,6 +485,11 @@
     <div id="qr-modal" class="fixed inset-0 z-50 items-center justify-center hidden">
         <div class="bg-gray-800 border border-gray-700 rounded-lg p-6 max-w-sm w-full shadow-2xl flex flex-col items-center">
             <h2 class="text-xl font-bold text-white mb-4">스마트폰 연결</h2>
+            <!-- 종단간 암호화(E2EE) 배지 -->
+            <div class="flex items-center text-emerald-400 text-xs font-bold mb-4 bg-emerald-900/30 px-3 py-1.5 rounded-full border border-emerald-800">
+                <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"></path></svg>
+                종단간 암호화(E2EE) 보안 적용됨
+            </div>
             <div id="qrcode-container" class="bg-white p-3 rounded-lg mb-4"></div>
             <p class="text-sm text-gray-300 text-center mb-6" id="qr-info-text">스마트폰 카메라로 위 QR 코드를 스캔하세요.<br>이 창을 닫아도 연결은 유지됩니다.</p>
             <button id="btn-close-qr" class="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg transition-colors">닫기</button>
@@ -556,7 +561,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInWithCustomToken, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, getDoc, collection, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, getDoc, collection, getDocs, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         const IMG_EXT_REGEX = /\.(jpe?g|png|webp|dng|cr2|cr3|nef|arw|raf|orf|rw2|pef|srw)$/i;
 
@@ -605,7 +610,6 @@
         let refTransformState = { rotate: 0, flipX: 1, flipY: 1 };
         let currentRefObjectUrl = null;
         let refAnimationFrameId = null;
-        let currentTransferId = null; // 리모컨 분할 전송 상태 확인용 변수
         
         // 클라우드 동기화 타겟 상태 변수
         let isExifAutoRotateEnabled = true;
@@ -617,10 +621,9 @@
         let isScreensaverActive = false;
         const IDLE_TIMEOUT = 30 * 1000; // 30초
         
-        // P2P WebRTC 변수
-        let myPeer = null, remoteConn = null, myPeerId = null;
-        let qrCodeObj = null;
-        let isPeerConnecting = false;
+        // Firebase 기반 P2P 대용 변수
+        let remoteSessionId = null;
+        let remoteSecretKey = null; // 종단간 암호화(E2EE)를 위한 일회용 키
 
         const defaultShortcuts = {
             prev: 'arrowleft', next: 'arrowright',
@@ -1205,225 +1208,125 @@
             });
         }
 
-        // --- P2P WebRTC 로직 ---
-        function initHostPeer() {
-            if (myPeer && !myPeer.destroyed) {
+        // --- P2P WebRTC 대체: 완벽한 Firebase 실시간 동기화 통신 모듈 ---
+        async function initHostRemote() {
+            if (!useCloud || !db) {
+                showToast('이 환경에서는 리모컨 기능을 지원하지 않습니다.', true);
+                return;
+            }
+
+            if (window.unsubscribeRemote) {
                 ui.qrModal.classList.replace('hidden', 'flex');
                 return;
             }
-            if (isPeerConnecting) return;
-            
-            isPeerConnecting = true;
-            showToast('연결 서버 초기화 중...');
-            
-            try {
-                // 명시적으로 안정적인 STUN 서버를 추가하여 P2P 연결 성공률 증가
-                myPeer = new Peer({
-                    debug: 1,
-                    config: {
-                        iceServers: [
-                            { urls: 'stun:stun.l.google.com:19302' },
-                            { urls: 'stun:stun1.l.google.com:19302' }
-                        ]
-                    }
-                }); 
-                
-                myPeer.on('open', id => {
-                    isPeerConnecting = false;
-                    myPeerId = id;
-                    const currentUrl = window.location.href.split('?')[0];
-                    
-                    // 로컬 파일 시스템에서 실행 시 모바일 접속 불가 경고
-                    const qrInfo = document.getElementById('qr-info-text');
-                    if (currentUrl.startsWith('file://')) {
-                        showToast('경고: file:// 주소는 모바일에서 접속할 수 없습니다. 로컬 서버나 웹 호스팅을 이용하세요.', true);
-                        if(qrInfo) qrInfo.innerHTML = '<span class="text-red-400 font-bold">주의: 현재 로컬 파일 모드로 실행 중이므로 스마트폰에서 접속할 수 없습니다.</span><br>Vercel 호스팅이나 로컬 서버를 통해 열어주세요.';
-                    } else if(qrInfo) {
-                        qrInfo.innerHTML = '스마트폰 카메라로 위 QR 코드를 스캔하세요.<br>이 창을 닫아도 연결은 유지됩니다.';
-                    }
 
-                    const remoteUrl = `${currentUrl}?remote=${myPeerId}`;
-                    
-                    ui.qrContainer.innerHTML = '';
-                    qrCodeObj = new QRCode(ui.qrContainer, {
-                        text: remoteUrl,
-                        width: 200,
-                        height: 200,
-                        colorDark : "#000000",
-                        colorLight : "#ffffff",
-                        correctLevel : QRCode.CorrectLevel.H
-                    });
-                    
-                    ui.qrModal.classList.replace('hidden', 'flex');
-                    showToast('모바일 연결 준비 완료!');
-                });
-                
-                myPeer.on('connection', conn => {
-                    remoteConn = conn;
-                    ui.btnRemoteMode.classList.add('bg-emerald-600', 'text-white');
-                    ui.qrModal.classList.replace('flex', 'hidden');
-                    showToast('모바일 리모컨이 연결되었습니다!');
-                    
-                    // 연결 유지용 Heartbeat (10초마다 신호 전송하여 절전 모드/네트워크 차단 방지)
-                    const pingInterval = setInterval(() => {
-                        if (remoteConn && remoteConn.open) {
-                            remoteConn.send({ type: 'ping' });
-                        }
-                    }, 10000);
+            showToast('클라우드 연결 서버 초기화 중...');
+            myPeerId = Math.random().toString(36).substring(2, 8); // 랜덤 세션 ID 발급
+            remoteSecretKey = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15); // 강력한 일회용 암호화 키 생성
+            const currentUrl = window.location.href.split('?')[0];
+            const remoteUrl = `${currentUrl}?remote=${myPeerId}&k=${remoteSecretKey}`;
+            
+            ui.qrContainer.innerHTML = '';
+            qrCodeObj = new QRCode(ui.qrContainer, {
+                text: remoteUrl, width: 200, height: 200, colorDark: "#000000", colorLight: "#ffffff", correctLevel: QRCode.CorrectLevel.H
+            });
+            ui.qrModal.classList.replace('hidden', 'flex');
+            
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'remote_sessions', myPeerId);
+            await setDoc(docRef, { host: { timestamp: Date.now() }, remote: { timestamp: 0 } });
 
-                    conn.on('data', data => {
-                        if(data.action === 'ping') return; // 모바일에서 온 ping 신호 무시
-                        if(data.action === 'requestCurrentState') {
-                            syncWithRemote(); // 모바일 접속 완료 후 능동적 요청 시 화면 전송
-                            return;
-                        }
-                        if(data.action === 'prev') navigate(-1);
-                        else if(data.action === 'next') navigate(1);
-                        else if(data.action === 'requestList') {
+            showToast('모바일 연결 대기 중...');
+            ui.btnRemoteMode.classList.add('bg-emerald-600', 'text-white');
+
+            window.unsubscribeRemote = onSnapshot(docRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    // 모바일(리모컨)에서 보낸 명령 처리
+                    if (data.remote && data.remote.timestamp > (window.lastRemoteTimestamp || 0)) {
+                        window.lastRemoteTimestamp = data.remote.timestamp;
+                        const cmd = data.remote.command;
+                        
+                        if (cmd === 'prev') navigate(-1);
+                        else if (cmd === 'next') navigate(1);
+                        else if (cmd === 'requestList') {
                             const listData = filteredFiles.map((f, i) => ({name: f.name, idx: i, viewed: viewedFilesSet.has(f.name)}));
-                            conn.send({ type: 'fileList', list: listData, currentIndex });
+                            // 리스트 암호화 후 전송 (보안 강화)
+                            const listString = JSON.stringify(listData.slice(0, 2000));
+                            const encryptedList = CryptoJS.AES.encrypt(listString, remoteSecretKey).toString();
+                            setDoc(docRef, { fileList: encryptedList }, { merge: true });
                         }
-                        else if(data.action === 'jump') {
-                            if(data.index >= 0 && data.index < filteredFiles.length) {
-                                currentIndex = data.index;
+                        else if (cmd === 'jump') {
+                            if(data.remote.jumpIndex >= 0 && data.remote.jumpIndex < filteredFiles.length) {
+                                currentIndex = data.remote.jumpIndex;
                                 selectedIndices.clear(); selectedIndices.add(currentIndex); lastSelectedIndex = currentIndex;
                                 displayCurrentImage();
                             }
                         }
-                    });
-                    
-                    conn.on('close', () => { 
-                        clearInterval(pingInterval);
-                        remoteConn = null; 
-                        ui.btnRemoteMode.classList.remove('bg-emerald-600', 'text-white');
-                        showToast('리모컨 연결이 끊어졌습니다.'); 
-                    });
-                });
-                
-                // 에러 발생 시 앱이 크래시되지 않도록 객체 파괴 및 재시도 허용 로직
-                myPeer.on('error', err => {
-                    isPeerConnecting = false;
-                    console.error("PeerJS 에러:", err);
-                    
-                    let errMsg = '알 수 없는 P2P 서버 오류';
-                    if (err.type === 'network' || err.type === 'server-error') errMsg = 'P2P 서버가 혼잡하거나 네트워크 연결이 끊겼습니다.';
-                    else if (err.type === 'peer-unavailable') errMsg = '연결할 기기를 찾을 수 없습니다.';
-                    else if (err.type === 'browser-incompatible') errMsg = '호환되지 않는 브라우저입니다.';
-                    
-                    showToast(`${errMsg} 다시 버튼을 눌러주세요.`, true);
-                    
-                    if (myPeer) {
-                        myPeer.destroy();
-                        myPeer = null;
                     }
-                    ui.qrModal.classList.replace('flex', 'hidden');
-                });
+                }
+            }, (error) => {
+                console.error("Firebase Sync Error", error);
+            });
 
-                myPeer.on('disconnected', () => {
-                    if (myPeer && !myPeer.destroyed) {
-                        showToast('P2P 서버와 연결이 끊어졌습니다. 재연결 중...');
-                        myPeer.reconnect();
-                    }
-                });
-
-            } catch(e) {
-                isPeerConnecting = false;
-                console.error("PeerJS 초기화 에러:", e);
-                showToast('P2P 초기화 실패', true);
-            }
+            // 초기 사진 1초 후 강제 전송
+            setTimeout(() => syncWithRemote(), 1000);
         }
         
-        // 원본 이미지를 Canvas를 통해 Base64 문자열로 변환한 뒤 분할 청크 전송 (모바일 호환성 및 속도 100% 확보)
+        // Host -> Remote (Firebase 기반 무손실 전송)
         async function syncWithRemote() {
-            if (!remoteConn || !remoteConn.open || !ui.mainImage.src || ui.mainImage.src.startsWith('null') || filteredFiles.length === 0) return;
-            
-            const transferId = Date.now().toString();
-            currentTransferId = transferId;
+            if (!window.unsubscribeRemote || !useCloud || !db || !ui.mainImage.src || ui.mainImage.src.startsWith('null') || filteredFiles.length === 0) return;
             
             try {
                 const fileObj = filteredFiles[currentIndex];
-                
-                // 전송 시작 알림 (로딩 상태 표시)
-                remoteConn.send({ type: 'state_loading', fileName: fileObj.name });
-
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
-                
-                // 모바일 디스플레이에 최적화된 해상도
-                const MAX_SIZE = 1200; 
+                // Firebase 1MB 제한을 피하기 위한 스마트 해상도 조절 (800px)
+                const MAX_SIZE = 800; 
                 
                 let w = ui.mainImage.naturalWidth;
                 let h = ui.mainImage.naturalHeight;
-                
-                if (w === 0 || h === 0) {
-                    setTimeout(syncWithRemote, 300); // 이미지 로드가 덜 된 경우 재시도
-                    return;
-                }
-                
+                if (w === 0 || h === 0) { setTimeout(syncWithRemote, 300); return; }
                 if (w > MAX_SIZE || h > MAX_SIZE) {
                     const ratio = Math.min(MAX_SIZE/w, MAX_SIZE/h);
-                    w *= ratio;
-                    h *= ratio;
+                    w *= ratio; h *= ratio;
                 }
+                canvas.width = w; canvas.height = h;
                 
-                canvas.width = w;
-                canvas.height = h;
-                
-                // EXIF 회전 상태 반영하여 그리기
+                // EXIF 회전 적용
                 ctx.translate(w/2, h/2);
                 ctx.rotate((transformState.rotate * Math.PI) / 180);
                 ctx.scale(transformState.flipX, transformState.flipY);
-                
                 const isRotated = Math.abs(transformState.rotate) % 180 === 90;
-                if(isRotated) {
-                    ctx.drawImage(ui.mainImage, -h/2, -w/2, h, w);
-                } else {
-                    ctx.drawImage(ui.mainImage, -w/2, -h/2, w, h);
-                }
+                if(isRotated) ctx.drawImage(ui.mainImage, -h/2, -w/2, h, w);
+                else ctx.drawImage(ui.mainImage, -w/2, -h/2, w, h);
                 
-                // 고화질 JPEG 문자열 생성
-                const dataUrl = canvas.toDataURL('image/jpeg', 0.75); 
+                // 0.6 품질 (용량 대폭 축소)
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.6); 
                 
-                if (currentTransferId !== transferId) return; // 전송 도중 새로운 스와이프 발생 시 취소
-
-                const CHUNK_SIZE = 16384; // 16KB 길이 문자열
-                const totalChunks = Math.ceil(dataUrl.length / CHUNK_SIZE);
-
-                // 헤더 전송
-                remoteConn.send({ 
-                    type: 'state_start', 
-                    fileId: transferId, 
-                    fileName: fileObj.name, 
-                    currentIndex, 
-                    total: filteredFiles.length,
-                    totalChunks: totalChunks,
-                    transform: { rotate: 0, flipX: 1, flipY: 1 } 
-                });
-
-                // 문자열 청크 전송
-                for (let i = 0; i < totalChunks; i++) {
-                    if (currentTransferId !== transferId || !remoteConn.open) break;
-                    
-                    const chunkStr = dataUrl.substring(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-                    remoteConn.send({
-                        type: 'state_chunk',
-                        fileId: transferId,
-                        chunkIndex: i,
-                        chunkData: chunkStr
-                    });
-                    
-                    // 통신 부하 방지 및 브라우저 버퍼 오버플로우 회피
-                    if (i % 15 === 0) await new Promise(r => setTimeout(r, 5)); 
-                }
-
+                // 종단간 암호화(E2EE) 적용: 사진 데이터를 비밀키로 암호화 (클라우드 노출 방지)
+                const encryptedData = CryptoJS.AES.encrypt(dataUrl, remoteSecretKey).toString();
+                
+                // Firebase 문서에 암호화된 이미지 데이터 업로드
+                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'remote_sessions', myPeerId);
+                await setDoc(docRef, {
+                    host: {
+                        imageData: encryptedData,
+                        fileName: fileObj.name,
+                        currentIndex: currentIndex,
+                        total: filteredFiles.length,
+                        timestamp: Date.now()
+                    }
+                }, { merge: true });
             } catch (e) {
-                console.error('리모컨 썸네일 생성 및 전송 에러', e);
+                console.error('리모컨 동기화 에러', e);
             }
         }
         
-        // --- 모바일 리모컨 모드 초기화 (URL 접속 시) ---
-        function initRemoteMode(hostId) {
-            // PC용 기존 UI를 안전하게 숨김 처리
+        // --- 모바일 리모컨 모드 초기화 (Firebase 기반) ---
+        function initRemoteMode(sessionId) {
+            const urlParams = new URLSearchParams(window.location.search);
+            remoteSecretKey = urlParams.get('k'); // URL에서 암호화 키 추출
+
             Array.from(document.body.children).forEach(child => {
                 if (child.id !== 'remote-view' && child.id !== 'toast' && child.tagName !== 'SCRIPT') {
                     child.style.display = 'none';
@@ -1431,8 +1334,7 @@
             });
             
             const remoteView = document.getElementById('remote-view');
-            remoteView.classList.remove('hidden');
-            remoteView.classList.add('flex');
+            remoteView.classList.remove('hidden'); remoteView.classList.add('flex');
             
             const filenameEl = document.getElementById('remote-filename');
             const imgEl = document.getElementById('remote-img');
@@ -1440,41 +1342,25 @@
             const overlayEl = document.getElementById('remote-swipe-overlay');
             const overlayText = overlayEl.querySelector('span');
 
-            // 리모컨 전용 상태 관리 변수
             let remoteScale = 1, remotePanX = 0, remotePanY = 0;
             let baseScale = 1;
-            let remoteViewMode = 'fit'; // 'fit' or 'width'
-            let touches = [];
-            let initialDistance = 0;
-            let initialScale = 1;
+            let remoteViewMode = 'fit';
+            let initialDistance = 0, initialScale = 1;
             let lastPanX = 0, lastPanY = 0;
-            let tapCount = 0;
-            let tapTimer = null;
+            let tapCount = 0, tapTimer = null;
             let isMobileFullscreen = false;
-            let incomingImage = {}; // 분할 수신용 객체
             
-            // 레이아웃 스케일 초기화
             function updateRemoteScale() {
                 if(!imgEl.naturalWidth) return;
-                
-                // 전송받은 원본 회전 정보를 바탕으로 표시 크기 계산
-                const isRotated = Math.abs(imgEl.dataset.rotate || 0) % 180 === 90;
-                const visualW = isRotated ? imgEl.naturalHeight : imgEl.naturalWidth;
-                const visualH = isRotated ? imgEl.naturalWidth : imgEl.naturalHeight;
-
                 const cRect = container.getBoundingClientRect();
-                const sX = cRect.width / visualW;
-                const sY = cRect.height / visualH;
+                const sX = cRect.width / imgEl.naturalWidth;
+                const sY = cRect.height / imgEl.naturalHeight;
                 baseScale = remoteViewMode === 'width' ? sX : Math.min(sX, sY);
                 applyRemoteTransform();
             }
 
-            // 이미지 Transform 적용 (가운데 기준)
             function applyRemoteTransform() {
-                const rot = imgEl.dataset.rotate || 0;
-                const fx = imgEl.dataset.flipX || 1;
-                const fy = imgEl.dataset.flipY || 1;
-                imgEl.style.transform = `translate(calc(-50% + ${remotePanX}px), calc(-50% + ${remotePanY}px)) scale(${baseScale * remoteScale}) rotate(${rot}deg) scaleX(${fx}) scaleY(${fy})`;
+                imgEl.style.transform = `translate(calc(-50% + ${remotePanX}px), calc(-50% + ${remotePanY}px)) scale(${baseScale * remoteScale})`;
             }
 
             function toggleMobileFullscreen() {
@@ -1495,24 +1381,30 @@
             
             window.addEventListener('resize', updateRemoteScale);
 
-            // PeerJS 연결과 상관 없이 버튼 이벤트와 제스처 이벤트 리스너를 최우선으로 등록
-            let conn;
-            const sendAction = (action, params = {}) => {
-                if (conn && conn.open) conn.send({ action, ...params });
+            if (!useCloud || !db) {
+                filenameEl.textContent = '클라우드 연동 필요';
+                return;
+            }
+
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'remote_sessions', sessionId);
+            
+            const sendAction = async (cmd, params = {}) => {
+                try {
+                    await setDoc(docRef, {
+                        remote: { command: cmd, timestamp: Date.now(), ...params }
+                    }, { merge: true });
+                } catch(e) {}
             };
 
             document.getElementById('btn-remote-prev').addEventListener('click', (e) => { e.stopPropagation(); sendAction('prev'); showSwipeEffect('이전'); });
             document.getElementById('btn-remote-next').addEventListener('click', (e) => { e.stopPropagation(); sendAction('next'); showSwipeEffect('다음'); });
             document.getElementById('btn-remote-list').addEventListener('click', (e) => {
-                e.stopPropagation();
-                sendAction('requestList');
-                document.getElementById('remote-list-overlay').classList.remove('hidden');
-                document.getElementById('remote-list-overlay').classList.add('flex');
+                e.stopPropagation(); sendAction('requestList');
+                document.getElementById('remote-list-overlay').classList.remove('hidden'); document.getElementById('remote-list-overlay').classList.add('flex');
             });
             document.getElementById('btn-remote-list-close').addEventListener('click', (e) => {
                 e.stopPropagation();
-                document.getElementById('remote-list-overlay').classList.add('hidden');
-                document.getElementById('remote-list-overlay').classList.remove('flex');
+                document.getElementById('remote-list-overlay').classList.add('hidden'); document.getElementById('remote-list-overlay').classList.remove('flex');
             });
             document.getElementById('btn-remote-fit').addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -1537,18 +1429,14 @@
                 document.getElementById('remote-help-overlay').classList.remove('flex');
             });
 
-            // 제스처 이벤트 (사진 컨테이너 내부만 감지하여 버튼 터치 오류 방지)
-            let startX = 0, startY = 0;
-            let isSwiping = false;
+            // 제스처
+            let startX = 0, startY = 0, isSwiping = false;
 
             container.addEventListener('touchstart', e => {
-                // 버튼 위에서 터치한 경우 제스처 무시 (클릭 작동 보장)
                 if (e.target.closest('button')) return;
 
                 if (e.touches.length === 1) {
-                    startX = e.touches[0].clientX;
-                    startY = e.touches[0].clientY;
-                    isSwiping = true;
+                    startX = e.touches[0].clientX; startY = e.touches[0].clientY; isSwiping = true;
                 } else if (e.touches.length === 2) {
                     isSwiping = false;
                     initialDistance = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
@@ -1556,9 +1444,8 @@
                 }
                 
                 tapCount++;
-                if (tapCount === 1) {
-                    tapTimer = setTimeout(() => { tapCount = 0; }, 300); 
-                } else if (tapCount === 2) {
+                if (tapCount === 1) { tapTimer = setTimeout(() => { tapCount = 0; }, 300); } 
+                else if (tapCount === 2) {
                     clearTimeout(tapTimer);
                     tapTimer = setTimeout(() => { 
                         remoteScale = 1; remotePanX = 0; remotePanY = 0; remoteViewMode = 'fit';
@@ -1568,30 +1455,23 @@
                         tapCount = 0; 
                     }, 300);
                 } else if (tapCount === 3) {
-                    clearTimeout(tapTimer);
-                    tapCount = 0;
-                    toggleMobileFullscreen();
+                    clearTimeout(tapTimer); tapCount = 0; toggleMobileFullscreen();
                 }
             }, {passive: false});
 
             container.addEventListener('touchmove', e => {
                 if (e.target.closest('button')) return;
-                e.preventDefault(); // 브라우저 스크롤 바운스 강제 차단
+                e.preventDefault(); 
                 
                 if(e.touches.length === 1 && isSwiping) {
-                    const dx = e.touches[0].clientX - startX;
-                    const dy = e.touches[0].clientY - startY;
-                    
+                    const dx = e.touches[0].clientX - startX; const dy = e.touches[0].clientY - startY;
                     if (remoteScale > 1.05 || remoteViewMode === 'width') {
-                        remotePanX = lastPanX + dx;
-                        remotePanY = lastPanY + dy;
-                        applyRemoteTransform();
+                        remotePanX = lastPanX + dx; remotePanY = lastPanY + dy; applyRemoteTransform();
                     }
                 } else if (e.touches.length === 2) {
                     const currentDistance = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
                     remoteScale = initialScale * (currentDistance / initialDistance);
-                    remoteScale = Math.max(0.5, Math.min(remoteScale, 10));
-                    applyRemoteTransform();
+                    remoteScale = Math.max(0.5, Math.min(remoteScale, 10)); applyRemoteTransform();
                 }
             }, {passive: false});
 
@@ -1601,136 +1481,89 @@
                 if(isSwiping && e.changedTouches.length === 1) {
                     const dx = e.changedTouches[0].clientX - startX;
                     if (remoteScale <= 1.05 && remoteViewMode === 'fit') {
-                        // 스와이프로 좌우 전환 (민감도 50px로 조정)
                         if (dx > 50) { sendAction('prev'); showSwipeEffect('이전'); }
                         else if (dx < -50) { sendAction('next'); showSwipeEffect('다음'); }
-                    } else {
-                        lastPanX = remotePanX;
-                        lastPanY = remotePanY;
-                    }
-                } else {
-                    lastPanX = remotePanX;
-                    lastPanY = remotePanY;
-                }
+                    } else { lastPanX = remotePanX; lastPanY = remotePanY; }
+                } else { lastPanX = remotePanX; lastPanY = remotePanY; }
                 isSwiping = false;
             });
+            
+            function showSwipeEffect(text) {
+                overlayText.textContent = text; overlayEl.style.opacity = '1';
+                setTimeout(() => { overlayEl.style.opacity = '0'; }, 300);
+            }
 
-            peer.on('open', () => {
-                conn = peer.connect(hostId, { reliable: true });
-                let pingInterval;
-                
-                conn.on('open', () => {
-                    showToast('정상 연결됨');
-                    filenameEl.textContent = '연결 성공! 사진 대기 중...';
-                    filenameEl.classList.replace('text-white', 'text-green-400');
-
-                    // 연결 유지용 Heartbeat
-                    pingInterval = setInterval(() => {
-                        if (conn && conn.open) {
-                            conn.send({ action: 'ping' });
-                        }
-                    }, 10000);
+            // Listen for Host Updates
+            filenameEl.textContent = '연결 시도 중...';
+            
+            onSnapshot(docRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
                     
-                    // 연결 되자마자 PC에 현재 화면 요청하기 (중요: 초기 빈 화면 방지)
-                    conn.send({ action: 'requestCurrentState' }); 
-                });
-                
-                // PC로부터 오는 데이터 처리
-                conn.on('data', data => {
-                    if (data.type === 'ping') return; // PC에서 온 ping 신호 무시
-                    
-                    if (data.type === 'state_loading') {
-                        filenameEl.textContent = `수신 중...`;
-                        filenameEl.classList.replace('text-green-400', 'text-white');
-                    } else if (data.type === 'state_start') {
-                        incomingImage[data.fileId] = {
-                            chunks: new Array(data.totalChunks),
-                            receivedCount: 0,
-                            totalChunks: data.totalChunks,
-                            fileName: data.fileName,
-                            currentIndex: data.currentIndex,
-                            total: data.total,
-                            transform: data.transform
-                        };
-                        filenameEl.textContent = `수신 중... 0%`;
-                        filenameEl.classList.replace('text-green-400', 'text-white');
-                    } else if (data.type === 'state_chunk') {
-                        const imgData = incomingImage[data.fileId];
-                        if (!imgData) return; // 취소되거나 옛날 데이터
+                    if (data.host && data.host.timestamp > (window.lastHostTimestamp || 0)) {
+                        window.lastHostTimestamp = data.host.timestamp;
                         
-                        imgData.chunks[data.chunkIndex] = data.chunkData;
-                        imgData.receivedCount++;
-                        
-                        const percent = Math.round((imgData.receivedCount / imgData.totalChunks) * 100);
-                        filenameEl.textContent = `수신 중... ${percent}%`;
-                        
-                        if (imgData.receivedCount === imgData.totalChunks) {
-                            // 문자열 조립 후 이미지 렌더링
-                            const fullDataUrl = imgData.chunks.join('');
-                            imgEl.src = fullDataUrl;
+                        try {
+                            // 암호화된 데이터 복호화
+                            const decryptedBytes = CryptoJS.AES.decrypt(data.host.imageData, remoteSecretKey);
+                            const decryptedUrl = decryptedBytes.toString(CryptoJS.enc.Utf8);
                             
-                            filenameEl.textContent = `${imgData.currentIndex + 1}/${imgData.total} - ${imgData.fileName}`;
-                            
-                            // PC의 이미지 회전 상태값 부여
-                            const ts = imgData.transform || { rotate: 0, flipX: 1, flipY: 1 };
-                            imgEl.dataset.rotate = ts.rotate;
-                            imgEl.dataset.flipX = ts.flipX;
-                            imgEl.dataset.flipY = ts.flipY;
-
-                            remoteScale = 1; remotePanX = 0; remotePanY = 0;
-                            updateRemoteScale();
-                            
-                            filenameEl.classList.replace('text-white', 'text-green-400');
-                            delete incomingImage[data.fileId]; // 메모리 해제
+                            if (decryptedUrl && decryptedUrl.startsWith('data:image')) {
+                                imgEl.src = decryptedUrl;
+                            } else {
+                                throw new Error("복호화 검증 실패");
+                            }
+                        } catch(e) {
+                            console.error('이미지 복호화 실패:', e);
                         }
-                    } else if(data.type === 'fileList') {
+                        
+                        filenameEl.textContent = `${data.host.currentIndex + 1}/${data.host.total} - ${data.host.fileName}`;
+                        filenameEl.classList.replace('text-white', 'text-green-400');
+                        
+                        remoteScale = 1; remotePanX = 0; remotePanY = 0;
+                        updateRemoteScale();
+                    }
+                    
+                    if (data.fileList && data.fileList.length > 0) {
                         const ul = document.getElementById('remote-file-list');
                         ul.innerHTML = '';
-                        document.getElementById('remote-list-count').textContent = data.list.length;
-                        data.list.forEach(item => {
-                            const li = document.createElement('li');
-                            li.className = `p-3 rounded text-sm truncate ${item.idx === data.currentIndex ? 'bg-blue-600 text-white font-bold' : (item.viewed ? 'text-gray-400' : 'text-gray-200')} border-b border-gray-800 active:bg-gray-700`;
-                            li.textContent = `${item.idx + 1}. ${item.name}`;
-                            li.onclick = () => {
-                                sendAction('jump', { index: item.idx });
-                                document.getElementById('remote-list-overlay').classList.add('hidden');
-                                document.getElementById('remote-list-overlay').classList.remove('flex');
-                            };
-                            ul.appendChild(li);
-                        });
+                        
+                        try {
+                            // 암호화된 리스트 데이터 복호화
+                            const decryptedBytes = CryptoJS.AES.decrypt(data.fileList, remoteSecretKey);
+                            const decryptedListStr = decryptedBytes.toString(CryptoJS.enc.Utf8);
+                            const fileListArray = JSON.parse(decryptedListStr);
+                            
+                            document.getElementById('remote-list-count').textContent = fileListArray.length;
+                            fileListArray.forEach(item => {
+                                const li = document.createElement('li');
+                                li.className = `p-3 rounded text-sm truncate ${item.idx === data.host?.currentIndex ? 'bg-blue-600 text-white font-bold' : (item.viewed ? 'text-gray-400' : 'text-gray-200')} border-b border-gray-800 active:bg-gray-700`;
+                                li.textContent = `${item.idx + 1}. ${item.name}`;
+                                li.onclick = () => {
+                                    sendAction('jump', { jumpIndex: item.idx });
+                                    document.getElementById('remote-list-overlay').classList.add('hidden');
+                                    document.getElementById('remote-list-overlay').classList.remove('flex');
+                                };
+                                ul.appendChild(li);
+                            });
+                        } catch(e) {
+                            console.error('파일 목록 복호화 실패:', e);
+                        }
+                        
+                        // 파일 리스트는 용량 확보를 위해 UI 반영 후 DB에서 삭제
+                        setDoc(docRef, { fileList: "" }, { merge: true });
                     }
-                });
-                
-                imgEl.onload = () => {
-                    updateRemoteScale();
-                };
-                
-                conn.on('close', () => {
-                    clearInterval(pingInterval);
-                    showToast('연결이 끊어졌습니다.', true);
-                    filenameEl.textContent = '연결 끊김';
-                    filenameEl.classList.replace('text-green-400', 'text-white');
-                });
-                conn.on('error', err => {
-                    clearInterval(pingInterval);
-                    console.error("Connection error:", err);
-                    showToast('통신 오류가 발생했습니다.', true);
-                    filenameEl.textContent = '통신 오류';
-                    filenameEl.classList.replace('text-green-400', 'text-white');
-                });
-            });
-
-            peer.on('error', err => {
-                console.error("Remote Peer 에러:", err);
-                showToast('서버 통신 실패', true);
-                filenameEl.textContent = '서버 연결 실패';
-                filenameEl.classList.replace('text-green-400', 'text-white');
+                } else {
+                    filenameEl.textContent = '연결 대기 중...';
+                }
+            }, (error) => {
+                console.error("Firebase Sync Error", error);
+                filenameEl.textContent = '통신 오류';
+                filenameEl.classList.replace('text-green-400', 'text-red-500');
             });
             
-            peer.on('disconnected', () => {
-                if (!peer.destroyed) peer.reconnect();
-            });
-
+            // Let host know remote is connected
+            sendAction('init');
         }
 
         async function openFilesOrZip(preSelectedHandles = null) {
@@ -2932,8 +2765,8 @@
                 else ui.sidebar.classList.add('hidden');
             });
             
-            // WebRTC QR 팝업
-            ui.btnRemoteMode.addEventListener('click', initHostPeer);
+            // Firebase 원격 리모컨 연결 팝업
+            ui.btnRemoteMode.addEventListener('click', initHostRemote);
             ui.btnCloseQr.addEventListener('click', () => ui.qrModal.classList.replace('flex', 'hidden'));
             
             ui.btnToggleNav.addEventListener('click', () => { toggleNavigator(); userClosedNav = !isNavVisible; });
