@@ -557,6 +557,7 @@
         let isDragging = false, isClick = false, startX = 0, startY = 0;
         let isLoupeActive = false, isNavVisible = false, userClosedNav = false; 
         let loupeRelativeScale = 2.0; 
+        let activeHoverArea = 'main'; // 현재 마우스가 위치한 영역 추적
         let transformState = { rotate: 0, flipX: 1, flipY: 1 };
         let animationFrameId = null;
 
@@ -2582,19 +2583,29 @@
 
         function toggleLoupe(active) {
             isLoupeActive = active;
-            ui.loupe.style.display = active && filteredFiles.length > 0 ? 'block' : 'none';
-            ui.mainImage.style.opacity = active ? '0.5' : '1';
             
-            ui.refLoupe.style.display = active && isCompareMode && currentRefObjectUrl ? 'block' : 'none';
-            ui.refImage.style.opacity = active ? '0.5' : '1';
+            // 양쪽 화면 초기화
+            ui.loupe.style.display = 'none';
+            ui.mainImage.style.opacity = '1';
+            ui.imageWrapper.classList.remove('loupe-active');
+            
+            ui.refLoupe.style.display = 'none';
+            ui.refImage.style.opacity = '1';
+            ui.refWrapper.classList.remove('loupe-active');
             
             if (active) {
-                ui.imageWrapper.classList.add('loupe-active');
-                ui.refWrapper.classList.add('loupe-active');
                 loupeRelativeScale = Math.max(1.5, loupeRelativeScale);
-            } else {
-                ui.imageWrapper.classList.remove('loupe-active');
-                ui.refWrapper.classList.remove('loupe-active');
+                
+                // 마우스가 위치한 영역에만 돋보기 활성화
+                if (activeHoverArea === 'main' && filteredFiles.length > 0) {
+                    ui.loupe.style.display = 'block';
+                    ui.mainImage.style.opacity = '0.5';
+                    ui.imageWrapper.classList.add('loupe-active');
+                } else if (activeHoverArea === 'ref' && isCompareMode && currentRefObjectUrl) {
+                    ui.refLoupe.style.display = 'block';
+                    ui.refImage.style.opacity = '0.5';
+                    ui.refWrapper.classList.add('loupe-active');
+                }
             }
         }
 
@@ -2976,10 +2987,12 @@
             ui.imageWrapper.addEventListener('wheel', handleWheelZoom, { passive: false });
             ui.imageWrapper.addEventListener('pointerdown', startDrag);
             ui.imageWrapper.addEventListener('pointermove', updateLoupe);
+            ui.imageWrapper.addEventListener('pointerenter', () => { activeHoverArea = 'main'; if(isLoupeActive) toggleLoupe(true); });
 
             ui.refWrapper.addEventListener('wheel', handleRefWheelZoom, { passive: false });
             ui.refWrapper.addEventListener('pointerdown', startRefDrag);
             ui.refWrapper.addEventListener('pointermove', updateRefLoupe);
+            ui.refWrapper.addEventListener('pointerenter', () => { activeHoverArea = 'ref'; if(isLoupeActive) toggleLoupe(true); });
 
             window.addEventListener('pointermove', drag, { passive: false });
             window.addEventListener('pointerup', endDrag);
