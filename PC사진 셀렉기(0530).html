@@ -1,0 +1,2591 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>사진 셀렉 Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 압축파일(ZIP) 지원 라이브러리 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <!-- EXIF 정보 및 RAW 파싱 라이브러리 -->
+    <script src="https://cdn.jsdelivr.net/npm/exifr/dist/full.umd.js"></script>
+    <!-- WebRTC P2P 통신 라이브러리 (모바일 리모컨용) -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <!-- QR 코드 생성 라이브러리 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        body {
+            background-color: #121212;
+            color: #e0e0e0;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        #image-wrapper, #ref-wrapper {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            cursor: grab;
+            touch-action: none; /* 모바일 드래그 시 브라우저 스크롤 간섭 방지 */
+        }
+        
+        #image-wrapper {
+            display: block; 
+        }
+
+        #image-wrapper.loupe-active {
+            cursor: none !important;
+        }
+
+        #image-wrapper:active, #ref-wrapper:active {
+            cursor: grabbing;
+        }
+
+        /* 렌더링 최적화: 절대 좌표 중앙 배치 후 Transform 제어 */
+        #main-image, #nav-img, #loupe-img, #ref-image {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            max-width: none;
+            max-height: none;
+            transform-origin: center center;
+            will-change: transform;
+            pointer-events: none;
+        }
+        
+        .smooth-transform {
+            transition: transform 0.15s cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+        
+        .dragging #main-image, .dragging #ref-image {
+            transition: none !important;
+        }
+        
+        /* 네비게이션 창 (미니맵) */
+        #navigator-panel {
+            position: absolute; right: 20px; top: 20px; width: 240px; background: rgba(17, 24, 39, 0.9);
+            border: 1px solid #374151; border-radius: 8px; overflow: hidden; z-index: 40;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5); display: none; backdrop-filter: blur(4px);
+        }
+        #nav-header { cursor: move; }
+        #nav-content { position: relative; width: 100%; height: 160px; display: block; background: #000; cursor: pointer; overflow: hidden; }
+        #nav-viewport { position: absolute; border: 2px solid #ef4444; background: rgba(239, 68, 68, 0.2); box-shadow: 0 0 0 9999px rgba(0,0,0,0.5); pointer-events: none; transition: all 0.1s; }
+
+        #loupe {
+            position: absolute; width: 250px; height: 250px; border-radius: 50%;
+            border: 3px solid rgba(255, 255, 255, 0.8); box-shadow: 0 0 15px rgba(0,0,0,0.5);
+            background-repeat: no-repeat; pointer-events: none; display: none; z-index: 50;
+            background-color: #1a1a1a; overflow: hidden;
+        }
+
+        .star-btn, .label-btn { transition: all 0.2s; }
+        .star-btn:hover { transform: scale(1.2); }
+        .star-active { color: #fbbf24; }
+        .star-inactive { color: #4b5563; }
+
+        .label-red { background-color: #ef4444; }
+        .label-yellow { background-color: #eab308; }
+        .label-green { background-color: #22c55e; }
+        .label-blue { background-color: #3b82f6; }
+        .label-purple { background-color: #a855f7; }
+        .label-none { background-color: transparent; border: 1px solid #4b5563; }
+        .label-active { border: 3px solid white; box-shadow: 0 0 10px rgba(255,255,255,0.5); }
+
+        .disabled-meta {
+            filter: grayscale(100%);
+            opacity: 0.3;
+            pointer-events: none;
+        }
+        .disabled-meta::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: -5%;
+            width: 110%;
+            height: 2px;
+            background-color: #ef4444;
+            transform: translateY(-50%);
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        #toast {
+            position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
+            background: rgba(0,0,0,0.8); color: white; padding: 10px 20px;
+            border-radius: 20px; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 100;
+        }
+
+        #shortcuts-modal, #qr-modal { background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(5px); }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.4); }
+        .drag-over { border-color: #3b82f6 !important; background-color: rgba(59, 130, 246, 0.1) !important; color: #ffffff !important; }
+        input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+        input[type="color"]::-webkit-color-swatch { border: 1px solid #4b5563; border-radius: 4px; }
+        
+        .file-list-item.active { background-color: #2563eb; color: white; }
+
+        .fullscreen-mode header { transform: translateY(-100%); transition: transform 0.3s; position: absolute; top: 0; width: 100%; z-index: 50; }
+        .fullscreen-mode footer { transform: translateY(100%); transition: transform 0.3s; position: absolute; bottom: 0; width: 100%; z-index: 50; }
+        .fullscreen-mode aside { transform: translateX(100%); transition: transform 0.3s; position: absolute; right: 0; height: 100%; z-index: 40; }
+        .fullscreen-mode main { padding: 0 !important; }
+        
+        .fullscreen-mode.show-header header { transform: translateY(0); }
+        .fullscreen-mode.show-footer footer { transform: translateY(0); }
+        .fullscreen-mode.show-sidebar aside { transform: translateX(0); }
+
+        /* 가로 스크롤바 숨기기 (반응형 UI용) */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body class="flex flex-col h-screen font-sans">
+
+    <!-- 상단 툴바 -->
+    <header id="top-toolbar" class="flex flex-nowrap items-center justify-between px-2 sm:px-4 py-1.5 sm:py-2 bg-gray-900 border-b border-gray-800 h-[50px] sm:h-[64px] shrink-0 z-30 relative shadow-md overflow-hidden gap-1 sm:gap-4 w-full cursor-grab active:cursor-grabbing">
+        <div class="flex items-center space-x-1 sm:space-x-2 shrink-0 min-w-0">
+            <!-- 타이틀 및 현재 폴더 이름 표시 영역 -->
+            <h1 id="header-title" class="text-xs sm:text-xl font-bold tracking-tight text-white truncate max-w-[60px] sm:max-w-xs shrink-0">📸 Photo HI</h1>
+            
+            <!-- 셀렉 통계 대시보드 -->
+            <div id="stat-dashboard" class="hidden md:flex items-center space-x-3 lg:space-x-5 bg-gray-800 px-3 lg:px-4 py-1.5 rounded-xl border border-gray-700 shadow-inner shrink-0 transition-opacity duration-300">
+                <!-- 진행률 -->
+                <div class="flex flex-col w-28 lg:w-36" title="전체 사진 중 열람한 사진의 비율">
+                    <div class="flex justify-between text-[10px] text-gray-400 font-medium mb-1">
+                        <span class="flex items-center"><svg class="w-3 h-3 mr-1 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>열람 진행률</span>
+                        <span id="stat-progress-txt" class="font-bold text-blue-400">0%</span>
+                    </div>
+                    <div class="w-full bg-gray-900 rounded-full h-1.5 overflow-hidden">
+                        <div id="stat-progress-bar" class="bg-blue-500 h-1.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+                    </div>
+                </div>
+                
+                <!-- 셀렉률 -->
+                <div class="flex flex-col w-28 lg:w-36" title="전체 사진 중 셀렉된 사진의 비율">
+                    <div class="flex justify-between text-[10px] text-gray-400 font-medium mb-1">
+                        <span class="flex items-center"><svg class="w-3 h-3 mr-1 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>셀렉률 (<span id="stat-select-count" class="text-white mx-0.5 font-bold">0</span>장)</span>
+                        <span id="stat-select-txt" class="font-bold text-green-400">0%</span>
+                    </div>
+                    <div class="w-full bg-gray-900 rounded-full h-1.5 overflow-hidden">
+                        <div id="stat-select-bar" class="bg-green-500 h-1.5 rounded-full transition-all duration-300 shadow-[0_0_8px_rgba(34,197,94,0.5)]" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <!-- 예상 셀렉 수 -->
+                <div class="flex flex-col items-center justify-center pl-4 border-l border-gray-600/50" title="현재 셀렉 패턴을 바탕으로 한 최종 예상 셀렉 수">
+                    <span class="text-[10px] text-gray-400 font-medium flex items-center"><svg class="w-3 h-3 mr-1 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>예상 셀렉</span>
+                    <div class="flex items-baseline mt-0.5">
+                        <span id="stat-estimate" class="text-sm font-bold text-yellow-400 leading-none">0</span>
+                        <span class="text-[10px] text-gray-500 ml-0.5">장</span>
+                    </div>
+                </div>
+
+                <!-- 촬영 정보 (EXIF) -->
+                <div class="hidden xl:flex flex-col items-start justify-center pl-4 border-l border-gray-600/50" title="현재 사진 촬영 정보 (조리개, 셔터속도, ISO, 화각, 플래시)">
+                    <span class="text-[10px] text-gray-400 font-medium flex items-center"><svg class="w-3 h-3 mr-1 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>촬영 정보</span>
+                    <div class="flex items-baseline mt-0.5">
+                        <span id="stat-exif" class="text-[11px] font-bold text-purple-300 leading-none font-mono tracking-tight">-</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="flex flex-nowrap items-center gap-1 sm:gap-2 shrink-0 ml-auto justify-end">
+            <!-- 모바일 리모컨 버튼 추가 -->
+            <button id="btn-remote-mode" class="p-1 sm:px-3 sm:py-1.5 text-[10px] sm:text-sm font-medium text-emerald-400 border border-emerald-600/50 bg-emerald-900/20 rounded hover:bg-emerald-900/40 transition-colors flex items-center shrink-0" title="모바일 기기로 현재 화면 제어">
+                <svg class="w-4 h-4 sm:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+                <span class="hidden sm:inline">리모컨</span>
+            </button>
+            <div class="w-px h-5 bg-gray-700 hidden sm:block mx-1"></div>
+
+            <div class="flex items-center space-x-1 sm:space-x-2 bg-gray-800 p-1 sm:px-3 sm:py-1.5 rounded border border-gray-700 shrink-0" title="배경색 변경">
+                <span class="text-xs text-gray-400 mr-1 hidden lg:inline">배경</span>
+                <!-- 모바일에서는 공간 확보를 위해 프리셋 숨김 -->
+                <div class="hidden sm:flex items-center space-x-1">
+                    <button class="w-4 h-4 rounded-full bg-black border border-gray-600 hover:scale-125 transition-transform" data-bg="#000000" title="검은색"></button>
+                    <button class="w-4 h-4 rounded-full bg-[#222222] border border-gray-500 hover:scale-125 transition-transform" data-bg="#222222" title="짙은 회색"></button>
+                    <button class="w-4 h-4 rounded-full bg-[#aaaaaa] border border-gray-400 hover:scale-125 transition-transform" data-bg="#aaaaaa" title="옅은 회색"></button>
+                    <button class="w-4 h-4 rounded-full bg-[#1c352d] border border-gray-500 hover:scale-125 transition-transform" data-bg="#1c352d" title="칠판색"></button>
+                    <div class="w-px h-4 bg-gray-600 mx-1"></div>
+                </div>
+                <input type="color" id="bg-color-picker" value="#000000" class="w-4 h-4 sm:w-6 sm:h-6 p-0 border-0 rounded cursor-pointer bg-transparent" title="사용자 지정 색상">
+            </div>
+            
+            <span id="file-counter" class="text-[10px] sm:text-sm font-mono text-gray-400 min-w-max text-center bg-gray-900/50 px-1.5 sm:px-2 py-1 rounded shrink-0">0/0</span>
+            
+            <div class="flex items-center space-x-0.5 sm:space-x-1 bg-gray-800 rounded p-0.5 border border-gray-700 shrink-0">
+                <button id="btn-toggle-nav" class="text-gray-400 hover:text-white focus:outline-none p-1 sm:px-2 sm:py-1 rounded hover:bg-gray-700 transition" title="네비게이션 켜기/끄기 (N)">
+                    <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"></path></svg>
+                </button>
+                <button id="btn-fullscreen" class="text-gray-400 hover:text-white focus:outline-none p-1 sm:px-2 sm:py-1 rounded hover:bg-gray-700 transition" title="전체화면 (F11)">
+                    <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path></svg>
+                </button>
+            </div>
+
+            <button id="btn-toggle-sidebar" class="p-1 sm:px-3 sm:py-1.5 text-[10px] sm:text-sm font-medium text-white bg-gray-700 border border-gray-600 rounded hover:bg-gray-600 focus:outline-none flex items-center transition-colors shadow-sm shrink-0">
+                <svg class="w-4 h-4 sm:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"></path></svg>
+                <span class="hidden sm:inline">목록</span>
+            </button>
+
+            <button id="btn-shortcuts" class="p-1 sm:px-3 sm:py-1.5 text-[10px] sm:text-sm font-medium text-gray-400 border border-gray-600 rounded hover:text-white hover:border-gray-400 transition-colors shrink-0" title="단축키(H)">
+                <svg class="w-4 h-4 block sm:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
+                <span class="hidden sm:inline">단축키 (<span id="btn-shortcuts-key">H</span>)</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- 중앙 레이아웃 -->
+    <div class="flex flex-1 relative overflow-hidden">
+        
+        <main id="main-area" class="flex-1 relative p-4 transition-colors overflow-hidden" style="background-color: #000000;">
+            <!-- 통합 및 최적화된 Drop Zone UI -->
+            <div id="drop-zone" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-11/12 max-w-2xl border-2 border-dashed border-white/40 rounded-2xl flex flex-col items-center justify-center py-16 px-4 text-gray-400 transition-all duration-200 hover:border-white/80 hover:text-white z-20 bg-black/80 backdrop-blur-sm shadow-2xl">
+                <svg class="w-16 h-16 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                <p class="text-2xl font-bold text-white mb-2 text-center" id="drop-msg">이미지, 폴더, ZIP 파일을 이곳에 드롭하세요</p>
+                <p class="text-sm text-center mb-8">모든 RAW 포맷(CR3, RAF 등) 지원 / EXIF 자동 회전</p>
+                
+                <!-- 통합된 2버튼 구조 -->
+                <div class="flex space-x-4">
+                    <button id="btn-main-open-folder" class="px-6 py-3 text-sm font-bold text-white bg-blue-600 rounded-lg hover:bg-blue-500 shadow-lg transition-transform hover:scale-105 focus:outline-none flex items-center">
+                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
+                        폴더 열기
+                    </button>
+                    <button id="btn-main-open-files" class="px-6 py-3 text-sm font-bold text-white bg-purple-600 rounded-lg hover:bg-purple-500 shadow-lg transition-transform hover:scale-105 focus:outline-none flex items-center">
+                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                        파일 / ZIP 열기
+                    </button>
+                </div>
+            </div>
+
+            <div id="error-msg" class="absolute inset-0 z-30 flex flex-col items-center justify-center text-gray-500 hidden bg-black/50 backdrop-blur-sm">
+                <svg class="w-16 h-16 mb-4 text-red-500/70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                <p class="text-xl font-bold text-white mb-2">미리보기를 불러올 수 없습니다</p>
+                <p class="text-sm">지원하지 않는 형식이거나 파일이 손상되었습니다.</p>
+            </div>
+
+            <!-- 스플릿 뷰 컨테이너 -->
+            <div id="viewer-container" class="absolute inset-0 z-10 flex" style="display: none;">
+                <!-- 왼쪽: 비교 뷰어 (스플릿 뷰, 기본 숨김) -->
+                <div id="ref-wrapper" class="relative flex-1 border-r border-gray-700 hidden overflow-hidden cursor-grab bg-black/50 transition-all">
+
+                    <img id="ref-image" class="smooth-transform absolute left-1/2 top-1/2 max-w-none max-h-none origin-center pointer-events-none hidden" src="" alt="">
+                    <!-- 비교 이미지 없음 안내 메시지 -->
+                    <div id="ref-empty-msg" class="absolute inset-0 flex flex-col items-center justify-center text-gray-500 pointer-events-none text-sm font-bold space-y-3 p-4 text-center">
+                        <svg class="w-12 h-12 text-gray-600 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2"></path></svg>
+                        <span>[비교 모드]<br>우측 파일 목록에서 사진을 이 영역으로<br>드래그 앤 드롭 하세요</span>
+                    </div>
+                    <!-- 파일 드래그 오버레이 -->
+                    <div id="ref-drop-overlay" class="absolute inset-0 flex items-center justify-center bg-blue-500/30 text-white font-bold opacity-0 transition-opacity pointer-events-none z-20 border-4 border-blue-500 border-dashed m-3 rounded-xl backdrop-blur-sm text-lg">
+                        여기에 사진 놓기
+                    </div>
+                </div>
+                
+                <!-- 오른쪽: 메인 뷰어 (항상 표시, 기본적으로 전체 화면 차지) -->
+                <div id="image-wrapper" class="relative flex-1 overflow-hidden cursor-grab block transition-all">
+
+                    <img id="main-image" class="smooth-transform absolute left-1/2 top-1/2 max-w-none max-h-none origin-center pointer-events-none" src="" alt="">
+                    <div id="loupe">
+                        <img id="loupe-img" src="">
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 내비게이터(미니맵) -->
+            <div id="navigator-panel">
+                <div id="nav-header" class="flex justify-between items-center px-3 py-1.5 bg-gray-800 border-b border-gray-700">
+                    <span class="text-xs font-bold text-gray-300">네비게이션 (<span id="tip-nav">N</span>)</span>
+                    <button id="btn-close-nav" class="text-gray-400 hover:text-white text-xs px-1">✕</button>
+                </div>
+                <div id="nav-content" title="클릭하여 해당 위치로 이동">
+                    <img id="nav-img" src="">
+                    <div id="nav-viewport"></div>
+                </div>
+            </div>
+
+            <button id="btn-prev" class="absolute left-4 top-1/2 -translate-y-1/2 p-4 text-white bg-black/30 rounded-full hover:bg-black/70 hidden z-20">
+                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+            </button>
+            <button id="btn-next" class="absolute right-4 top-1/2 -translate-y-1/2 p-4 text-white bg-black/30 rounded-full hover:bg-black/70 hidden z-20">
+                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+            </button>
+        </main>
+
+        <!-- 오른쪽 목록 사이드바 -->
+        <aside id="sidebar" class="w-72 max-w-[85vw] bg-gray-900 border-l border-gray-800 flex flex-col shrink-0 z-40 absolute md:relative right-0 h-full transition-transform duration-300 shadow-2xl md:shadow-none">
+            <div class="p-3 border-b border-gray-800 bg-gray-900 shadow-sm z-10 flex flex-col space-y-3">
+                <!-- 파일 목록 헤더와 아이콘 버튼들을 같은 줄 정렬 -->
+                <div class="flex items-center justify-between w-full">
+                    <div class="flex items-center space-x-2">
+                        <h3 class="text-sm font-bold text-white">파일 목록</h3>
+                        <span id="loading-indicator" class="text-xs text-blue-400 hidden animate-pulse">읽는 중...</span>
+                    </div>
+                    
+                    <div class="flex items-center space-x-1">
+                        <button id="btn-sidebar-add-folder" class="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition focus:outline-none" title="새 폴더 열기">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
+                        </button>
+                        <button id="btn-sidebar-add-files" class="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition focus:outline-none" title="새 파일 / ZIP 열기">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 직관적인 전체 선택, TXT, XMP 저장 UI -->
+                <div class="flex space-x-2 mt-1 w-full">
+                    <label class="flex-1 flex items-center justify-center space-x-1.5 cursor-pointer bg-gray-700 hover:bg-gray-600 px-2 py-2 rounded-md border border-gray-600 transition shadow-inner" title="전체 선택 / 해제">
+                        <input type="checkbox" id="chk-select-all" class="w-4 h-4 rounded border-gray-500 bg-gray-800 cursor-pointer accent-blue-500">
+                        <span class="text-xs text-white font-bold select-none">전체</span>
+                    </label>
+                    <button id="btn-export-txt" class="flex items-center justify-center bg-gray-700 hover:bg-gray-600 px-2 py-2 rounded-md border border-gray-600 transition shadow-inner text-gray-300 hover:text-white" title="선택 파일명 TXT 저장 (폴더 모드 시 원본 폴더에 저장)">
+                        <svg class="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                        <span class="text-xs font-bold">TXT</span>
+                    </button>
+                    <div class="relative group">
+                        <button class="flex items-center justify-center bg-gray-700 hover:bg-gray-600 px-2 py-2 rounded-md border border-gray-600 transition shadow-inner text-gray-300 hover:text-white" title="메타데이터를 XMP 파일로 저장">
+                            <svg class="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                            <span class="text-xs font-bold">XMP ▼</span>
+                        </button>
+                        <div class="absolute right-0 top-full mt-1 w-24 bg-gray-800 border border-gray-700 rounded shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all flex flex-col overflow-hidden z-50">
+                            <button id="btn-export-xmp-single" class="w-full text-left px-3 py-2 text-xs text-white hover:bg-blue-600 transition">개별 다운</button>
+                            <button id="btn-export-xmp-zip" class="w-full text-left px-3 py-2 text-xs text-white hover:bg-blue-600 transition">압축 다운</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 필터 영역 -->
+                <div class="flex space-x-1.5 z-10 relative">
+                    <select id="filter-rating" class="flex-1 min-w-0 bg-gray-800 text-gray-300 text-xs px-1 py-1.5 rounded border border-gray-700 outline-none">
+                        <option value="all">모든 등급</option>
+                        <option value="1">★ 1 이상</option><option value="2">★ 2 이상</option><option value="3">★ 3 이상</option>
+                        <option value="4">★ 4 이상</option><option value="5">★ 5</option><option value="0">등급 없음</option>
+                    </select>
+                    <select id="filter-label" class="flex-1 min-w-0 bg-gray-800 text-gray-300 text-xs px-1 py-1.5 rounded border border-gray-700 outline-none">
+                        <option value="all">모든 라벨</option>
+                        <option value="Red">빨강</option><option value="Yellow">노랑</option><option value="Green">초록</option>
+                        <option value="Blue">파랑</option><option value="Purple">보라</option><option value="none">라벨 없음</option>
+                    </select>
+                    <select id="filter-viewed" class="flex-1 min-w-0 bg-gray-800 text-gray-300 text-xs px-1 py-1.5 rounded border border-gray-700 outline-none" title="열람 상태로 필터링">
+                        <option value="all">전체 상태</option>
+                        <option value="unviewed">미열람</option>
+                        <option value="viewed">열람함</option>
+                    </select>
+                </div>
+            </div>
+            <ul id="file-list" class="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-0.5 select-none relative z-0"></ul>
+        </aside>
+    </div>
+
+    <!-- 하단 툴바 -->
+    <footer id="bottom-toolbar" class="flex flex-nowrap items-center justify-between px-1.5 sm:px-6 py-1 sm:py-2 bg-gray-900 border-t border-gray-800 h-[50px] sm:h-[60px] shrink-0 z-30 relative overflow-hidden gap-1 sm:gap-4 w-full cursor-grab active:cursor-grabbing">
+        <!-- 1그룹: 파일명 및 보기 설정 -->
+        <div class="flex items-center gap-1 sm:gap-2 shrink-0 min-w-0">
+            <span id="file-name" class="hidden md:block font-mono text-sm text-gray-300 truncate max-w-[150px] shrink-0">파일 없음</span>
+            
+            <!-- 보기 모드 / 줌 선택 -->
+            <select id="zoom-select" class="bg-gray-800 text-gray-300 text-[10px] sm:text-xs px-1 sm:px-2 py-1 sm:py-1.5 rounded border border-gray-700 shrink-0 outline-none w-[60px] sm:w-auto">
+                <optgroup label="보기 모드">
+                    <option value="fit" selected>화면 맞춤</option>
+                    <option value="width">가로 맞춤</option>
+                    <option value="height">세로 맞춤</option>
+                </optgroup>
+                <optgroup label="확대 배율">
+                    <option value="0.5">50%</option><option value="1">100%</option>
+                    <option value="1.5">150%</option><option value="2">200%</option>
+                    <option value="3">300%</option><option value="4">400%</option>
+                    <option value="custom" hidden>사용자 지정</option>
+                </optgroup>
+            </select>
+            
+            <!-- 회전/반전 버튼 그룹 및 EXIF 토글 -->
+            <div class="flex items-center bg-gray-800 rounded border border-gray-700 shrink-0">
+                <button id="btn-toggle-exif" class="px-1.5 sm:px-2 py-1 sm:py-1.5 text-[9px] sm:text-xs font-bold text-blue-400 hover:text-blue-300 transition" title="RAW 자동 회전 (EXIF 적용)">
+                    EXIF<span class="hidden sm:inline"> ON</span>
+                </button>
+                <div class="w-px h-3 sm:h-4 bg-gray-600 mx-0.5"></div>
+                <button id="btn-rot-left" class="p-1 sm:p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 transition" title="반시계 회전 (↓)">
+                    <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path stroke-linecap="round" stroke-linejoin="round" d="M3 3v5h5"/></svg>
+                </button>
+                <button id="btn-rot-right" class="p-1 sm:p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 transition" title="시계 회전 (↑)">
+                    <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 1 1-9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path stroke-linecap="round" stroke-linejoin="round" d="M21 3v5h-5"/></svg>
+                </button>
+                <div class="w-px h-3 sm:h-4 bg-gray-600 mx-0.5"></div>
+                <button id="btn-flip-h" class="p-1 sm:p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 transition" title="좌우 반전">
+                    <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 2 L12 22"/><path stroke-linecap="round" stroke-linejoin="round" d="M8 9 L5 12 L8 15"/><path stroke-linecap="round" stroke-linejoin="round" d="M16 9 L19 12 L16 15"/></svg>
+                </button>
+                <button id="btn-flip-v" class="p-1 sm:p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 transition" title="상하 반전">
+                    <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2 12 L22 12"/><path stroke-linecap="round" stroke-linejoin="round" d="M9 8 L12 5 L15 8"/><path stroke-linecap="round" stroke-linejoin="round" d="M9 16 L12 19 L15 16"/></svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- 2그룹: 메타데이터 지정 -->
+        <div class="flex items-center justify-center space-x-1 sm:space-x-4 px-1 sm:px-2 shrink-0 mx-auto">
+            <div class="flex items-center justify-center space-x-0 sm:space-x-1 relative" id="rating-container"></div>
+            <div class="w-px h-4 sm:h-6 bg-gray-700 hidden sm:block"></div>
+            <div class="flex space-x-1 sm:space-x-2 relative" id="label-container">
+                <button class="label-btn label-red w-3 h-3 sm:w-5 sm:h-5 rounded-full" data-label="Red" id="tip-labelRed"></button>
+                <button class="label-btn label-yellow w-3 h-3 sm:w-5 sm:h-5 rounded-full" data-label="Yellow" id="tip-labelYellow"></button>
+                <button class="label-btn label-green w-3 h-3 sm:w-5 sm:h-5 rounded-full" data-label="Green" id="tip-labelGreen"></button>
+                <button class="label-btn label-blue w-3 h-3 sm:w-5 sm:h-5 rounded-full" data-label="Blue" id="tip-labelBlue"></button>
+                <button class="label-btn label-purple w-3 h-3 sm:w-5 sm:h-5 rounded-full" data-label="Purple" id="tip-labelPurple"></button>
+                <button class="label-btn label-none w-3 h-3 sm:w-5 sm:h-5 rounded-full" data-label="" id="tip-rate0" title="등급 초기화 (0)"></button>
+            </div>
+        </div>
+
+        <!-- 3그룹: 액션 버튼 -->
+        <div class="flex items-center justify-end gap-1 sm:gap-2 shrink-0 ml-auto">
+            <button id="btn-open-dest" class="p-1 sm:px-3 sm:py-1.5 text-[10px] sm:text-sm font-medium text-gray-300 bg-gray-700 rounded hover:bg-gray-600 focus:outline-none flex items-center shrink-0" title="셀렉 폴더 설정" disabled>
+                <svg class="w-4 h-4 sm:mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z"></path></svg>
+                <span class="hidden sm:inline">대상 폴더</span>
+            </button>
+            <button id="btn-move" class="p-1 sm:px-4 sm:py-1.5 text-[10px] sm:text-sm font-medium text-white bg-green-700 rounded hover:bg-green-600 disabled:opacity-50 flex items-center shrink-0" title="셀렉 (Enter)">
+                <svg class="w-4 h-4 sm:mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                <span class="hidden sm:inline">셀렉 (<span id="tip-move">Enter</span>)</span>
+            </button>
+        </div>
+    </footer>
+
+    <!-- 토스트 메시지 -->
+    <div id="toast">메시지</div>
+
+    <!-- 단축키 모달 -->
+    <div id="shortcuts-modal" class="fixed inset-0 z-50 items-center justify-center hidden">
+        <div class="bg-gray-800 border border-gray-700 rounded-lg p-6 max-w-md w-full shadow-2xl flex flex-col max-h-[90vh]">
+            <div class="flex justify-between items-center mb-4 shrink-0">
+                <h2 class="text-xl font-bold text-white">단축키 설정</h2>
+                <button id="btn-close-modal" class="text-gray-400 hover:text-white focus:outline-none"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"></path></svg></button>
+            </div>
+            <div class="space-y-1 text-sm text-gray-300 overflow-y-auto custom-scrollbar pr-2 flex-1" id="shortcuts-list">
+            </div>
+            <div class="mt-4 pt-4 border-t border-gray-700 flex justify-between items-center shrink-0">
+                <button id="btn-reset-shortcuts" class="text-sm text-blue-400 hover:text-blue-300 focus:outline-none">기본값 복원</button>
+                <div class="text-xs text-yellow-500 text-right">클라우드에 자동 저장됩니다.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 모바일 리모컨 QR 모달 -->
+    <div id="qr-modal" class="fixed inset-0 z-50 items-center justify-center hidden">
+        <div class="bg-gray-800 border border-gray-700 rounded-lg p-6 max-w-sm w-full shadow-2xl flex flex-col items-center">
+            <h2 class="text-xl font-bold text-white mb-4">스마트폰 연결</h2>
+            <div id="qrcode-container" class="bg-white p-3 rounded-lg mb-4"></div>
+            <p class="text-sm text-gray-300 text-center mb-6" id="qr-info-text">스마트폰 카메라로 위 QR 코드를 스캔하세요.<br>이 창을 닫아도 연결은 유지됩니다.</p>
+            <button id="btn-close-qr" class="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg transition-colors">닫기</button>
+        </div>
+    </div>
+
+    <!-- 모바일 전용 리모컨 UI (PC에서는 숨김) -->
+    <div id="remote-view" class="hidden fixed inset-0 z-[99999] bg-gray-900 flex-col items-center p-4 h-full w-full">
+        <div class="flex items-center justify-between w-full mb-4">
+            <span class="text-gray-400 text-sm font-bold">Photo HI 리모컨</span>
+            <span id="remote-status" class="px-2 py-1 text-xs font-bold text-yellow-800 bg-yellow-400 rounded-full animate-pulse">연결 중...</span>
+        </div>
+        
+        <div class="flex-1 w-full bg-black rounded-xl mb-4 relative overflow-hidden flex items-center justify-center shadow-inner border border-gray-700">
+            <img id="remote-img" class="max-w-full max-h-full object-contain" src="" alt="PC에서 사진을 열면 여기에 표시됩니다." />
+            <div id="remote-swipe-overlay" class="absolute inset-0 z-10 flex items-center justify-center opacity-0 transition-opacity">
+                <span class="bg-black/50 text-white px-4 py-2 rounded-full font-bold text-xl backdrop-blur-sm pointer-events-none"></span>
+            </div>
+        </div>
+        
+        <div class="flex w-full space-x-3 h-20 shrink-0">
+            <button id="btn-remote-prev" class="flex-1 bg-gray-800 active:bg-gray-700 border border-gray-700 text-white rounded-xl text-lg font-bold flex flex-col items-center justify-center shadow-lg transition-colors">
+                <svg class="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+                이전
+            </button>
+            <button id="btn-remote-next" class="flex-1 bg-blue-700 active:bg-blue-600 border border-blue-600 text-white rounded-xl text-lg font-bold flex flex-col items-center justify-center shadow-lg transition-colors">
+                <svg class="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                다음
+            </button>
+        </div>
+    </div>
+
+    <!-- 스크린 세이버 -->
+    <div id="screensaver" class="fixed inset-0 bg-black flex flex-col items-center justify-center opacity-0 pointer-events-none transition-opacity duration-700" style="z-index: 9999;">
+        <div id="screensaver-time" class="text-6xl text-gray-500 font-mono mb-4 font-bold tracking-widest"></div>
+        <div class="text-gray-600 animate-pulse text-sm">보안을 위해 화면이 잠겼습니다. 조작 시 해제됩니다.</div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInWithCustomToken, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, collection, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const IMG_EXT_REGEX = /\.(jpe?g|png|webp|dng|cr2|cr3|nef|arw|raf|orf|rw2|pef|srw)$/i;
+
+        // Firebase Cloud DB 설정 (로컬 환경 예외 처리 강화)
+        let useCloud = false;
+        let app, auth, db, currentUserId = null;
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+        if (typeof __firebase_config !== 'undefined') {
+            try {
+                const firebaseConfig = JSON.parse(__firebase_config);
+                app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+                useCloud = true;
+            } catch(e) {
+                console.warn("Firebase Init failed locally.", e);
+            }
+        }
+
+        // --- 상태 변수 ---
+        let srcDirHandle = null, destDirHandle = null, isZipMode = false;
+        let allFiles = [], filteredFiles = [];
+        let currentIndex = -1, currentObjectUrl = null;
+        
+        let selectedIndices = new Set();
+        let lastSelectedIndex = 0;
+        let viewedFilesSet = new Set(); 
+        let loadedContextId = ''; 
+        
+        let zoomMulti = 1; 
+        let viewMode = 'fit', lastCustomZoomMulti = 2.5;
+        let panX = 0, panY = 0;
+        let isDragging = false, isClick = false;
+        let startX = 0, startY = 0;
+        let isLoupeActive = false, isNavVisible = false;
+        let userClosedNav = false; 
+        let loupeRelativeScale = 2.0; 
+        let transformState = { rotate: 0, flipX: 1, flipY: 1 };
+        let animationFrameId = null;
+
+        let isCompareMode = false;
+        let refZoomMulti = 1, refPanX = 0, refPanY = 0;
+        let isRefDragging = false, refStartX = 0, refStartY = 0;
+        let refTransformState = { rotate: 0, flipX: 1, flipY: 1 };
+        let currentRefObjectUrl = null;
+        let refAnimationFrameId = null;
+        
+        // 클라우드 동기화 타겟 상태 변수
+        let isExifAutoRotateEnabled = true;
+        let currentRating = 0, currentLabel = '';
+        let isSidebarVisible = true; 
+
+        // 스크린 세이버 상태 변수
+        let idleTimer = null;
+        let isScreensaverActive = false;
+        const IDLE_TIMEOUT = 30 * 1000; // 30초
+        
+        // P2P WebRTC 변수
+        let myPeer = null, remoteConn = null, myPeerId = null;
+        let qrCodeObj = null;
+        let isPeerConnecting = false;
+
+        const defaultShortcuts = {
+            prev: 'arrowleft', next: 'arrowright',
+            zoomIn: '+', zoomOut: '-', loupe: '.', nav: 'n',
+            rotRight: 'arrowup', rotLeft: 'arrowdown',
+            rate1: '1', rate2: '2', rate3: '3', rate4: '4', rate5: '5', rate0: '0',
+            labelRed: '6', labelYellow: '7', labelGreen: '8', labelBlue: '9', labelPurple: 't',
+            move: 'enter', modal: 'h'
+        };
+        let userShortcuts = { ...defaultShortcuts };
+        let isBindingKey = false, bindingAction = null;
+
+        const labelColorMap = {
+            'Red': 'bg-red-500', 'Yellow': 'bg-yellow-500',
+            'Green': 'bg-green-500', 'Blue': 'bg-blue-500', 'Purple': 'bg-purple-500'
+        };
+
+        const ui = {
+            headerTitle: document.getElementById('header-title'),
+            statDashboard: document.getElementById('stat-dashboard'),
+            statProgressTxt: document.getElementById('stat-progress-txt'),
+            statProgressBar: document.getElementById('stat-progress-bar'),
+            statSelectCount: document.getElementById('stat-select-count'),
+            statSelectTxt: document.getElementById('stat-select-txt'),
+            statSelectBar: document.getElementById('stat-select-bar'),
+            statEstimate: document.getElementById('stat-estimate'),
+            btnMainOpenFolder: document.getElementById('btn-main-open-folder'),
+            btnMainOpenFiles: document.getElementById('btn-main-open-files'),
+            btnSidebarAddFolder: document.getElementById('btn-sidebar-add-folder'),
+            btnSidebarAddFiles: document.getElementById('btn-sidebar-add-files'),
+            btnOpenDest: document.getElementById('btn-open-dest'), btnMove: document.getElementById('btn-move'),
+            btnPrev: document.getElementById('btn-prev'), btnNext: document.getElementById('btn-next'),
+            btnToggleSidebar: document.getElementById('btn-toggle-sidebar'), btnFullscreen: document.getElementById('btn-fullscreen'),
+            btnToggleNav: document.getElementById('btn-toggle-nav'), chkSelectAll: document.getElementById('chk-select-all'),
+            sidebar: document.getElementById('sidebar'), fileList: document.getElementById('file-list'),
+            filterRating: document.getElementById('filter-rating'), filterLabel: document.getElementById('filter-label'), filterViewed: document.getElementById('filter-viewed'),
+            loadingIndicator: document.getElementById('loading-indicator'), dropZone: document.getElementById('drop-zone'), dropMsg: document.getElementById('drop-msg'),
+            mainArea: document.getElementById('main-area'), 
+            viewerContainer: document.getElementById('viewer-container'),
+            imageWrapper: document.getElementById('image-wrapper'), mainImage: document.getElementById('main-image'), loupeImg: document.getElementById('loupe-img'),
+            refWrapper: document.getElementById('ref-wrapper'), refImage: document.getElementById('ref-image'), refEmptyMsg: document.getElementById('ref-empty-msg'), refDropOverlay: document.getElementById('ref-drop-overlay'),
+            zoomSelect: document.getElementById('zoom-select'), bgColorPicker: document.getElementById('bg-color-picker'),
+            loupe: document.getElementById('loupe'), navPanel: document.getElementById('navigator-panel'),
+            navContent: document.getElementById('nav-content'), navImg: document.getElementById('nav-img'), navViewport: document.getElementById('nav-viewport'), navHeader: document.getElementById('nav-header'), btnCloseNav: document.getElementById('btn-close-nav'),
+            btnToggleExif: document.getElementById('btn-toggle-exif'), btnRotLeft: document.getElementById('btn-rot-left'), btnRotRight: document.getElementById('btn-rot-right'), btnFlipH: document.getElementById('btn-flip-h'), btnFlipV: document.getElementById('btn-flip-v'),
+            btnExportTxt: document.getElementById('btn-export-txt'), btnExportXmpSingle: document.getElementById('btn-export-xmp-single'), btnExportXmpZip: document.getElementById('btn-export-xmp-zip'),
+            fileName: document.getElementById('file-name'), fileCounter: document.getElementById('file-counter'),
+            ratingContainer: document.getElementById('rating-container'), labelContainer: document.getElementById('label-container'),
+            toast: document.getElementById('toast'), modal: document.getElementById('shortcuts-modal'), errorMsg: document.getElementById('error-msg'),
+            btnShortcuts: document.getElementById('btn-shortcuts'), btnCloseModal: document.getElementById('btn-close-modal'), btnResetShortcuts: document.getElementById('btn-reset-shortcuts'),
+            statExif: document.getElementById('stat-exif'),
+            
+            // WebRTC UI
+            btnRemoteMode: document.getElementById('btn-remote-mode'),
+            qrModal: document.getElementById('qr-modal'),
+            qrContainer: document.getElementById('qrcode-container'),
+            btnCloseQr: document.getElementById('btn-close-qr')
+        };
+
+        // --- 마우스 드래그를 이용한 스와이프 스크롤 (Pointer Events 방식) ---
+        function enableDragScroll(selector) {
+            const slider = document.querySelector(selector);
+            if (!slider) return;
+            let isDown = false;
+            let startX;
+            let scrollLeft;
+
+            slider.addEventListener('pointerdown', (e) => {
+                // 클릭 가능한 요소(버튼, 입력창 등)를 클릭한 경우는 드래그 기능 무시
+                if (e.target.closest('button') || e.target.closest('input') || e.target.closest('select') || e.target.closest('label')) {
+                    return;
+                }
+                isDown = true;
+                startX = e.pageX - slider.offsetLeft;
+                scrollLeft = slider.scrollLeft;
+                if (slider.setPointerCapture) slider.setPointerCapture(e.pointerId);
+            });
+            
+            slider.addEventListener('pointerleave', () => { isDown = false; });
+            slider.addEventListener('pointerup', () => { isDown = false; });
+            slider.addEventListener('pointercancel', () => { isDown = false; });
+            
+            slider.addEventListener('pointermove', (e) => {
+                if (!isDown) return;
+                e.preventDefault();
+                const x = e.pageX - slider.offsetLeft;
+                const walk = (x - startX) * 1.5; // 스크롤 속도
+                slider.scrollLeft = scrollLeft - walk;
+            });
+        }
+
+        // --- Firebase Cloud 연동 함수 ---
+        async function loadSettingsFromCloud() {
+            if (!useCloud || !currentUserId) return;
+            try {
+                const docRef = doc(db, 'artifacts', appId, 'users', currentUserId, 'settings', 'userPreferences');
+                const docSnap = await getDoc(docRef);
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    if (data.isExifAutoRotateEnabled !== undefined) isExifAutoRotateEnabled = data.isExifAutoRotateEnabled;
+                    if (data.isSidebarVisible !== undefined) isSidebarVisible = data.isSidebarVisible;
+                    if (data.shortcuts) userShortcuts = { ...defaultShortcuts, ...data.shortcuts };
+                    if (data.bgColor) {
+                        ui.mainArea.style.backgroundColor = data.bgColor;
+                        ui.bgColorPicker.value = data.bgColor;
+                    }
+                }
+            } catch(e) { console.error("Cloud DB Load Error:", e); }
+        }
+
+        async function saveSettingsToCloud() {
+            if (!useCloud || !currentUserId) return;
+            try {
+                const docRef = doc(db, 'artifacts', appId, 'users', currentUserId, 'settings', 'userPreferences');
+                await setDoc(docRef, {
+                    isExifAutoRotateEnabled,
+                    isSidebarVisible,
+                    shortcuts: userShortcuts,
+                    bgColor: ui.bgColorPicker.value
+                }, { merge: true });
+            } catch (e) { console.error("Cloud DB Save Error:", e); }
+        }
+
+        async function loadViewedProgress() {
+            if (!useCloud || !loadedContextId || !currentUserId) return;
+            try {
+                const docRef = doc(db, 'artifacts', appId, 'users', currentUserId, 'progress', loadedContextId);
+                const docSnap = await getDoc(docRef);
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    viewedFilesSet = new Set(data.viewedFiles || []);
+                } else {
+                    viewedFilesSet.clear();
+                }
+            } catch(e) { console.error(e); }
+        }
+
+        async function saveViewedProgress() {
+            if (!useCloud || !loadedContextId || !currentUserId) return;
+            try {
+                const docRef = doc(db, 'artifacts', appId, 'users', currentUserId, 'progress', loadedContextId);
+                await setDoc(docRef, {
+                    timestamp: Date.now(),
+                    viewedFiles: Array.from(viewedFilesSet)
+                });
+                cleanupOldProgress(); 
+            } catch(e) { console.error(e); }
+        }
+
+        async function cleanupOldProgress() {
+            if (!useCloud || !currentUserId) return;
+            try {
+                const collRef = collection(db, 'artifacts', appId, 'users', currentUserId, 'progress');
+                const snapshot = await getDocs(collRef);
+                const now = Date.now();
+                const TWO_WEEKS_MS = 14 * 24 * 60 * 60 * 1000;
+                let docsList = [];
+                snapshot.forEach(d => docsList.push({ id: d.id, data: d.data() }));
+                
+                docsList.sort((a,b) => b.data.timestamp - a.data.timestamp);
+
+                for (let i = 0; i < docsList.length; i++) {
+                    if (i >= 4 || (now - docsList[i].data.timestamp > TWO_WEEKS_MS)) {
+                        await deleteDoc(doc(db, 'artifacts', appId, 'users', currentUserId, 'progress', docsList[i].id));
+                    }
+                }
+            } catch(e) { console.error(e); }
+        }
+
+        // --- 스크린 세이버 함수 ---
+        function showScreensaver() {
+            if (isScreensaverActive) return;
+            isScreensaverActive = true;
+            const ss = document.getElementById('screensaver');
+            ss.classList.remove('pointer-events-none');
+            ss.style.opacity = '1';
+            updateScreensaverTime();
+            if (!window.ssTimeInterval) window.ssTimeInterval = setInterval(updateScreensaverTime, 1000);
+        }
+
+        function hideScreensaver() {
+            if (!isScreensaverActive) return;
+            isScreensaverActive = false;
+            const ss = document.getElementById('screensaver');
+            ss.style.opacity = '0';
+            ss.classList.add('pointer-events-none');
+            if (window.ssTimeInterval) {
+                clearInterval(window.ssTimeInterval);
+                window.ssTimeInterval = null;
+            }
+        }
+
+        function updateScreensaverTime() {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const timeEl = document.getElementById('screensaver-time');
+            if (timeEl) timeEl.textContent = timeStr;
+        }
+
+        function resetIdleTimer() {
+            if (isScreensaverActive) hideScreensaver();
+            if (idleTimer) clearTimeout(idleTimer);
+            idleTimer = setTimeout(showScreensaver, IDLE_TIMEOUT);
+        }
+
+        function setSmoothTransform(enable) {
+            if (enable) {
+                ui.mainImage.classList.add('smooth-transform');
+                if(ui.refImage) ui.refImage.classList.add('smooth-transform');
+                ui.navViewport.style.transition = 'all 0.15s cubic-bezier(0.2, 0.8, 0.2, 1)';
+            } else {
+                ui.mainImage.classList.remove('smooth-transform');
+                if(ui.refImage) ui.refImage.classList.remove('smooth-transform');
+                ui.navViewport.style.transition = 'none';
+            }
+        }
+
+        function updateExifToggleUI() {
+            if (isExifAutoRotateEnabled) {
+                ui.btnToggleExif.textContent = 'EXIF ON';
+                ui.btnToggleExif.classList.replace('text-gray-500', 'text-blue-400');
+                ui.btnToggleExif.classList.replace('hover:text-gray-300', 'hover:text-blue-300');
+            } else {
+                ui.btnToggleExif.textContent = 'EXIF OFF';
+                ui.btnToggleExif.classList.replace('text-blue-400', 'text-gray-500');
+                ui.btnToggleExif.classList.replace('hover:text-blue-300', 'hover:text-gray-300');
+            }
+        }
+
+        async function updateExifDisplay(blob) {
+            if (!ui.statExif) return;
+            try {
+                const exifData = await exifr.parse(blob, { pick: ['FNumber', 'ExposureTime', 'ISO', 'FocalLength', 'Flash'] });
+                if (!exifData) { ui.statExif.textContent = '정보 없음'; return; }
+                let textParts = [];
+                if (exifData.FNumber) textParts.push(`F${exifData.FNumber}`);
+                if (exifData.ExposureTime) {
+                    let speed = exifData.ExposureTime;
+                    if (speed < 1) textParts.push(`1/${Math.round(1 / speed)}s`);
+                    else textParts.push(`${speed}s`);
+                }
+                if (exifData.ISO) textParts.push(`ISO${exifData.ISO}`);
+                if (exifData.FocalLength) textParts.push(`${Math.round(exifData.FocalLength)}mm`);
+                if (exifData.Flash !== undefined) {
+                    const flashStr = String(exifData.Flash).toLowerCase();
+                    const isFired = flashStr.includes('fired') || flashStr === 'true';
+                    textParts.push(isFired ? '⚡ON' : '⚡OFF');
+                }
+                ui.statExif.textContent = textParts.length > 0 ? textParts.join(' | ') : '정보 없음';
+            } catch(e) { ui.statExif.textContent = '정보 없음'; }
+        }
+
+        function updateDashboard() {
+            if (!ui.statDashboard) return;
+            const total = allFiles.length;
+            if (total === 0) { ui.statDashboard.classList.replace('flex', 'hidden'); return; }
+            
+            ui.statDashboard.classList.replace('hidden', 'flex');
+            const viewedCount = viewedFilesSet.size;
+            const selectedCount = allFiles.filter(f => f.isCopied).length;
+
+            const progressRate = total > 0 ? (viewedCount / total) * 100 : 0;
+            const selectRate = total > 0 ? (selectedCount / total) * 100 : 0;
+            
+            let estimatedCount = 0;
+            if (viewedCount > 0) {
+                const viewedAndSelectedCount = allFiles.filter(f => f.isCopied && viewedFilesSet.has(f.name)).length;
+                const currentHitRate = viewedAndSelectedCount / viewedCount;
+                estimatedCount = Math.round(currentHitRate * total);
+            }
+
+            ui.statProgressTxt.textContent = Math.round(progressRate) + '%';
+            ui.statProgressBar.style.width = progressRate + '%';
+            
+            ui.statSelectCount.textContent = selectedCount;
+            ui.statSelectTxt.textContent = Math.round(selectRate) + '%';
+            ui.statSelectBar.style.width = selectRate + '%';
+            
+            ui.statEstimate.textContent = estimatedCount;
+        }
+
+        async function verifyPermission(fileHandle, readWrite) {
+            const options = {};
+            if (readWrite) options.mode = 'readwrite';
+            if ((await fileHandle.queryPermission(options)) === 'granted') return true;
+            if ((await fileHandle.requestPermission(options)) === 'granted') return true;
+            return false;
+        }
+
+        // --- 복구된 누락 함수들 (단축키, 모드 토글, 드래그앤드롭 등) ---
+        function loadShortcuts() {
+            const saved = localStorage.getItem('photoCullingShortcuts_v6');
+            if (saved) { try { userShortcuts = { ...defaultShortcuts, ...JSON.parse(saved) }; } catch(e) {} }
+            renderShortcutsList();
+        }
+
+        function saveShortcuts() {
+            localStorage.setItem('photoCullingShortcuts_v6', JSON.stringify(userShortcuts));
+            renderShortcutsList();
+        }
+
+        function formatKeyDisplay(key) {
+            if (!key) return '없음'; if (key === ' ') return 'Space'; if (key === 'arrowleft') return '←';
+            if (key === 'arrowright') return '→'; if (key === 'arrowup') return '↑'; if (key === 'arrowdown') return '↓';
+            if (key === 'escape') return 'ESC'; if (key === 'enter') return 'Enter';
+            return key.toUpperCase();
+        }
+
+        function renderShortcutsList() {
+            const list = document.getElementById('shortcuts-list');
+            if (!list) return;
+            list.innerHTML = '';
+            const categories = {
+                '이동 및 화면': { prev: '이전 사진', next: '다음 사진', zoomIn: '화면 확대 (+)', zoomOut: '화면 축소 (-)', loupe: '부분 확대 유지', nav: '네비게이션 켜기/끄기', rotRight: '오른쪽 회전', rotLeft: '왼쪽 회전' },
+                '별점 및 라벨': { rate1: '별점 1', rate2: '별점 2', rate3: '별점 3', rate4: '별점 4', rate5: '별점 5', rate0: '등급 초기화', labelRed: '빨강 라벨 (토글)', labelYellow: '노랑 라벨 (토글)', labelGreen: '초록 라벨 (토글)', labelBlue: '파랑 라벨 (토글)', labelPurple: '보라 라벨 (토글)' },
+                '작업': { move: '선택 파일 셀렉(토글)', modal: '단축키 창 열기/닫기' }
+            };
+
+            for (const [catName, actions] of Object.entries(categories)) {
+                const title = document.createElement('div');
+                title.className = 'text-xs text-gray-500 font-bold mt-4 mb-1 uppercase tracking-wider'; title.textContent = catName; list.appendChild(title);
+                for (const [action, label] of Object.entries(actions)) {
+                    if(!userShortcuts[action] && userShortcuts[action] !== '') continue;
+                    const row = document.createElement('div');
+                    row.className = 'flex justify-between border-b border-gray-700/50 py-1.5 items-center';
+                    row.innerHTML = `<span>${label}</span> <button class="shortcut-key font-mono bg-gray-900 px-2 py-1 rounded text-white hover:bg-gray-700 min-w-[30px] transition-colors" data-action="${action}">${formatKeyDisplay(userShortcuts[action])}</button>`;
+                    row.querySelector('.shortcut-key').addEventListener('click', (e) => {
+                        if (isBindingKey) cancelBinding();
+                        isBindingKey = true; bindingAction = action;
+                        e.target.textContent = '대기...'; e.target.classList.replace('bg-gray-900', 'bg-blue-600'); e.target.classList.add('animate-pulse');
+                    });
+                    list.appendChild(row);
+                }
+            }
+            
+            const compareTitle = document.createElement('div');
+            compareTitle.className = 'text-xs text-blue-400 font-bold mt-4 mb-1 uppercase tracking-wider'; compareTitle.textContent = '고정 단축키'; list.appendChild(compareTitle);
+            const compareRow = document.createElement('div');
+            compareRow.className = 'flex justify-between border-b border-gray-700/50 py-1.5 items-center text-gray-400';
+            compareRow.innerHTML = `<span>사진 비교 모드 (스플릿 뷰) 토글</span> <span class="font-mono bg-gray-800 px-2 py-1 rounded">Shift + R</span>`;
+            list.appendChild(compareRow);
+
+            const elShortcut = document.getElementById('btn-shortcuts-key');
+            if (elShortcut) elShortcut.textContent = formatKeyDisplay(userShortcuts.modal);
+            const elMove = document.getElementById('tip-move');
+            if (elMove) elMove.textContent = formatKeyDisplay(userShortcuts.move);
+            const elNav = document.getElementById('tip-nav');
+            if (elNav) elNav.textContent = formatKeyDisplay(userShortcuts.nav);
+        }
+
+        function cancelBinding() { isBindingKey = false; bindingAction = null; renderShortcutsList(); }
+
+        function handleKeydown(e) {
+            if (isBindingKey) {
+                e.preventDefault(); const key = e.key.toLowerCase();
+                if (key === 'escape') { cancelBinding(); return; }
+                for (const action in userShortcuts) { if (userShortcuts[action] === key && action !== bindingAction) userShortcuts[action] = ''; }
+                userShortcuts[bindingAction] = key; saveSettingsToCloud(); isBindingKey = false; bindingAction = null; renderShortcutsList(); return;
+            }
+
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+            const key = e.key.toLowerCase();
+            
+            if (e.shiftKey && key === 'r') { e.preventDefault(); toggleCompareMode(); return; }
+
+            // 전체화면에서 f11을 누를 경우 스크린 세이버 동작
+            if (key === 'f11') { 
+                e.preventDefault(); 
+                if (document.body.classList.contains('fullscreen-mode')) {
+                    showScreensaver();
+                } else {
+                    toggleFullscreen(); 
+                }
+                return; 
+            }
+            
+            if (key === 'escape') { ui.modal.classList.add('hidden'); return; }
+            if (key === userShortcuts.modal) { ui.modal.classList.toggle('hidden'); return; }
+            if (filteredFiles.length === 0) return;
+
+            if (key === userShortcuts.prev) navigate(-1);
+            else if (key === userShortcuts.next) navigate(1);
+            else if (key === userShortcuts.rotRight) { e.preventDefault(); transformState.rotate = (transformState.rotate + 90) % 360; setSmoothTransform(true); updateZoomUI(); }
+            else if (key === userShortcuts.rotLeft) { e.preventDefault(); transformState.rotate = (transformState.rotate - 90) % 360; setSmoothTransform(true); updateZoomUI(); }
+            else if (key === userShortcuts.rate1) updateMetadata(1, currentLabel);
+            else if (key === userShortcuts.rate2) updateMetadata(2, currentLabel);
+            else if (key === userShortcuts.rate3) updateMetadata(3, currentLabel);
+            else if (key === userShortcuts.rate4) updateMetadata(4, currentLabel);
+            else if (key === userShortcuts.rate5) updateMetadata(5, currentLabel);
+            else if (key === userShortcuts.rate0) updateMetadata(0, currentLabel);
+            else if (key === userShortcuts.labelRed) updateMetadata(currentRating, currentLabel === 'Red' ? '' : 'Red');
+            else if (key === userShortcuts.labelYellow) updateMetadata(currentRating, currentLabel === 'Yellow' ? '' : 'Yellow');
+            else if (key === userShortcuts.labelGreen) updateMetadata(currentRating, currentLabel === 'Green' ? '' : 'Green');
+            else if (key === userShortcuts.labelBlue) updateMetadata(currentRating, currentLabel === 'Blue' ? '' : 'Blue');
+            else if (key === userShortcuts.labelPurple) updateMetadata(currentRating, currentLabel === 'Purple' ? '' : 'Purple');
+            else if (key === userShortcuts.zoomIn || (userShortcuts.zoomIn === '+' && key === '=')) { zoomMulti = Math.min(zoomMulti + 0.5, 20); lastCustomZoomMulti = zoomMulti; viewMode = 'custom'; setSmoothTransform(true); updateZoomUI(); }
+            else if (key === userShortcuts.zoomOut || (userShortcuts.zoomOut === '-' && key === '_')) { zoomMulti = Math.max(zoomMulti - 0.5, 0.1); lastCustomZoomMulti = zoomMulti; viewMode = 'custom'; setSmoothTransform(true); updateZoomUI(); }
+            else if (key === userShortcuts.nav) { toggleNavigator(); userClosedNav = !isNavVisible; }
+            else if (key === userShortcuts.loupe && !e.repeat) toggleLoupe(true);
+            else if (key === userShortcuts.move) {
+                e.preventDefault(); 
+                if(isZipMode) showToast('ZIP 내 이미지는 셀렉(복사)할 수 없습니다.');
+                else if (destDirHandle && !ui.btnMove.disabled) moveSelectedFiles();
+                else showToast('셀렉할 폴더를 먼저 선택해주세요.');
+            }
+        }
+
+        function handleKeyup(e) { if (e.key.toLowerCase() === userShortcuts.loupe) toggleLoupe(false); }
+
+        function toggleCompareMode() {
+            if (filteredFiles.length === 0) {
+                showToast('사진 목록을 먼저 불러와주세요.'); return;
+            }
+            isCompareMode = !isCompareMode;
+            if (isCompareMode) {
+                ui.refWrapper.classList.remove('hidden'); ui.refWrapper.classList.add('block');
+                showToast('반반 스플릿 뷰 켜짐 (우측 파일 목록에서 좌측 화면으로 사진을 드래그하세요)', false);
+            } else {
+                ui.refWrapper.classList.add('hidden'); ui.refWrapper.classList.remove('block');
+                showToast('기본 모드(1화면)로 돌아왔습니다.', false);
+            }
+            setTimeout(() => {
+                if(viewMode !== 'custom') resetTransform(); else { clampPan(); applyTransform(); }
+                if(isCompareMode && currentRefObjectUrl) { resetRefTransform(); }
+            }, 10);
+        }
+
+        function toggleFullscreen() {
+            const isFull = document.body.classList.contains('fullscreen-mode');
+            if (!isFull) {
+                if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(()=>{});
+                document.body.classList.add('fullscreen-mode');
+            } else {
+                if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(()=>{});
+                document.body.classList.remove('fullscreen-mode');
+            }
+            setTimeout(() => { 
+                setSmoothTransform(false); clampPan(); applyTransform(); 
+                if(isCompareMode && currentRefObjectUrl) { clampRefPan(); applyRefTransform(); }
+            }, 300);
+        }
+
+        function setupFullscreenHover() {
+            window.addEventListener('mousemove', (e) => {
+                if (!document.body.classList.contains('fullscreen-mode')) return;
+                const margin = 45;
+                document.body.classList.toggle('show-header', e.clientY < margin);
+                document.body.classList.toggle('show-footer', e.clientY > window.innerHeight - margin);
+                
+                if (!ui.sidebar.classList.contains('hidden')) {
+                    if (e.clientX > window.innerWidth - margin) document.body.classList.add('show-sidebar');
+                    else if (e.clientX < window.innerWidth - 300) document.body.classList.remove('show-sidebar');
+                }
+            });
+        }
+
+        function setupDragAndDrop() {
+            window.addEventListener('dragover', (e) => { 
+                e.preventDefault(); 
+                if (e.dataTransfer.types.includes('application/x-photo-index')) return; 
+                ui.dropZone.classList.add('drag-over'); 
+            });
+            window.addEventListener('dragleave', (e) => { e.preventDefault(); if (e.clientX === 0 || e.clientY === 0) ui.dropZone.classList.remove('drag-over'); });
+            window.addEventListener('drop', async (e) => {
+                e.preventDefault(); ui.dropZone.classList.remove('drag-over');
+                if (e.dataTransfer.types.includes('application/x-photo-index')) return;
+
+                if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+                    try {
+                        const handlePromises = [];
+                        for (let i = 0; i < e.dataTransfer.items.length; i++) {
+                            const item = e.dataTransfer.items[i];
+                            if (item.kind === 'file' || item.kind === 'directory') {
+                                handlePromises.push(item.getAsFileSystemHandle());
+                            }
+                        }
+                        const handles = await Promise.all(handlePromises);
+                        
+                        if (handles.length === 1 && handles[0].kind === 'directory') {
+                            if (await verifyPermission(handles[0], true)) {
+                                srcDirHandle = handles[0];
+                                openSourceDirectory(handles[0]);
+                            } else {
+                                showToast('폴더 접근 권한이 거부되었습니다.', true);
+                            }
+                        } else {
+                            const fileHandles = handles.filter(h => h && h.kind === 'file');
+                            if (fileHandles.length > 0) {
+                                let allGranted = true;
+                                for (const handle of fileHandles) {
+                                    if (!(await verifyPermission(handle, false))) {
+                                        allGranted = false;
+                                        break;
+                                    }
+                                }
+                                if (allGranted) openFilesOrZip(fileHandles);
+                                else showToast('파일 접근 권한이 거부되었습니다.', true);
+                            } else showToast('지원되는 파일이나 폴더를 드롭해주세요.');
+                        }
+                    } catch (err) {
+                        console.error(err); showToast('파일을 불러오는 중 오류가 발생했습니다.');
+                    }
+                }
+            });
+        }
+
+        function setupRefDragAndDrop() {
+            ui.refWrapper.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                if (e.dataTransfer.types.includes('application/x-photo-index')) ui.refDropOverlay.style.opacity = '1';
+            });
+            ui.refWrapper.addEventListener('dragleave', (e) => { ui.refDropOverlay.style.opacity = '0'; });
+            ui.refWrapper.addEventListener('drop', (e) => {
+                e.preventDefault(); e.stopPropagation(); ui.refDropOverlay.style.opacity = '0';
+                const idxStr = e.dataTransfer.getData('application/x-photo-index');
+                if (idxStr !== '') {
+                    const idx = parseInt(idxStr, 10);
+                    if (!isNaN(idx) && filteredFiles[idx]) loadRefImage(filteredFiles[idx]);
+                }
+            });
+        }
+
+        // --- P2P WebRTC 로직 ---
+        function initHostPeer() {
+            if (myPeer && !myPeer.destroyed) {
+                ui.qrModal.classList.replace('hidden', 'flex');
+                return;
+            }
+            if (isPeerConnecting) return;
+            
+            isPeerConnecting = true;
+            showToast('연결 서버 초기화 중...');
+            
+            try {
+                // 명시적으로 안정적인 STUN 서버를 추가하여 P2P 연결 성공률 증가
+                myPeer = new Peer({
+                    debug: 1,
+                    config: {
+                        iceServers: [
+                            { urls: 'stun:stun.l.google.com:19302' },
+                            { urls: 'stun:stun1.l.google.com:19302' }
+                        ]
+                    }
+                }); 
+                
+                myPeer.on('open', id => {
+                    isPeerConnecting = false;
+                    myPeerId = id;
+                    const currentUrl = window.location.href.split('?')[0];
+                    
+                    // 로컬 파일 시스템에서 실행 시 모바일 접속 불가 경고
+                    const qrInfo = document.getElementById('qr-info-text');
+                    if (currentUrl.startsWith('file://')) {
+                        showToast('경고: file:// 주소는 모바일에서 접속할 수 없습니다. 로컬 서버나 웹 호스팅을 이용하세요.', true);
+                        if(qrInfo) qrInfo.innerHTML = '<span class="text-red-400 font-bold">주의: 현재 로컬 파일 모드로 실행 중이므로 스마트폰에서 접속할 수 없습니다.</span><br>Vercel 호스팅이나 로컬 서버를 통해 열어주세요.';
+                    } else if(qrInfo) {
+                        qrInfo.innerHTML = '스마트폰 카메라로 위 QR 코드를 스캔하세요.<br>이 창을 닫아도 연결은 유지됩니다.';
+                    }
+
+                    const remoteUrl = `${currentUrl}?remote=${myPeerId}`;
+                    
+                    ui.qrContainer.innerHTML = '';
+                    qrCodeObj = new QRCode(ui.qrContainer, {
+                        text: remoteUrl,
+                        width: 200,
+                        height: 200,
+                        colorDark : "#000000",
+                        colorLight : "#ffffff",
+                        correctLevel : QRCode.CorrectLevel.H
+                    });
+                    
+                    ui.qrModal.classList.replace('hidden', 'flex');
+                    showToast('모바일 연결 준비 완료!');
+                });
+                
+                myPeer.on('connection', conn => {
+                    remoteConn = conn;
+                    ui.btnRemoteMode.classList.add('bg-emerald-600', 'text-white');
+                    ui.qrModal.classList.replace('flex', 'hidden');
+                    showToast('모바일 리모컨이 연결되었습니다!');
+                    
+                    conn.on('data', data => {
+                        if(data.action === 'prev') navigate(-1);
+                        else if(data.action === 'next') navigate(1);
+                    });
+                    
+                    conn.on('close', () => { 
+                        remoteConn = null; 
+                        ui.btnRemoteMode.classList.remove('bg-emerald-600', 'text-white');
+                        showToast('리모컨 연결이 끊어졌습니다.'); 
+                    });
+                    
+                    syncWithRemote(); 
+                });
+                
+                // 에러 발생 시 앱이 크래시되지 않도록 객체 파괴 및 재시도 허용 로직
+                myPeer.on('error', err => {
+                    isPeerConnecting = false;
+                    console.error("PeerJS 에러:", err);
+                    
+                    let errMsg = '알 수 없는 P2P 서버 오류';
+                    if (err.type === 'network' || err.type === 'server-error') errMsg = 'P2P 서버가 혼잡하거나 네트워크 연결이 끊겼습니다.';
+                    else if (err.type === 'peer-unavailable') errMsg = '연결할 기기를 찾을 수 없습니다.';
+                    else if (err.type === 'browser-incompatible') errMsg = '호환되지 브라우저입니다.';
+                    
+                    showToast(`${errMsg} 다시 버튼을 눌러주세요.`, true);
+                    
+                    if (myPeer) {
+                        myPeer.destroy();
+                        myPeer = null;
+                    }
+                    ui.qrModal.classList.replace('flex', 'hidden');
+                });
+
+                myPeer.on('disconnected', () => {
+                    if (myPeer && !myPeer.destroyed) {
+                        showToast('P2P 서버와 연결이 끊어졌습니다. 재연결 중...');
+                        myPeer.reconnect();
+                    }
+                });
+
+            } catch(e) {
+                isPeerConnecting = false;
+                console.error("PeerJS 초기화 에러:", e);
+                showToast('P2P 초기화 실패', true);
+            }
+        }
+        
+        function syncWithRemote() {
+            if (!remoteConn || !ui.mainImage.src || ui.mainImage.src.startsWith('null')) return;
+            
+            // 모바일 전송용 저용량 썸네일 생성 (Canvas 이용)
+            try {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                const MAX_SIZE = 500; // 해상도 리밋 (속도 위해)
+                
+                let w = ui.mainImage.naturalWidth;
+                let h = ui.mainImage.naturalHeight;
+                
+                if (w === 0 || h === 0) return;
+                
+                if (w > MAX_SIZE || h > MAX_SIZE) {
+                    const ratio = Math.min(MAX_SIZE/w, MAX_SIZE/h);
+                    w *= ratio;
+                    h *= ratio;
+                }
+                
+                canvas.width = w;
+                canvas.height = h;
+                
+                // EXIF 회전 상태 반영하여 그리기
+                ctx.translate(w/2, h/2);
+                ctx.rotate((transformState.rotate * Math.PI) / 180);
+                ctx.scale(transformState.flipX, transformState.flipY);
+                
+                // 회전 시 너비/높이 스왑 고려
+                const isRotated = Math.abs(transformState.rotate) % 180 === 90;
+                if(isRotated) {
+                    ctx.drawImage(ui.mainImage, -h/2, -w/2, h, w);
+                } else {
+                    ctx.drawImage(ui.mainImage, -w/2, -h/2, w, h);
+                }
+                
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.5); // 화질 50%
+                remoteConn.send({ type: 'image', data: dataUrl });
+            } catch (e) {
+                console.error('리모컨 썸네일 전송 에러', e);
+            }
+        }
+        
+        // --- 모바일 리모컨 모드 초기화 (URL 접속 시) ---
+        function initRemoteMode(hostId) {
+            // 기존 PC UI 전부 삭제/숨김 처리
+            document.body.innerHTML = ''; 
+            const remoteView = document.getElementById('remote-view');
+            document.body.appendChild(remoteView);
+            remoteView.classList.replace('hidden', 'flex');
+            
+            const statusEl = document.getElementById('remote-status');
+            const imgEl = document.getElementById('remote-img');
+            const overlayEl = document.getElementById('remote-swipe-overlay');
+            const overlayText = overlayEl.querySelector('span');
+            
+            try {
+                const peer = new Peer({
+                    debug: 1,
+                    config: {
+                        iceServers: [
+                            { urls: 'stun:stun.l.google.com:19302' },
+                            { urls: 'stun:stun1.l.google.com:19302' }
+                        ]
+                    }
+                });
+                
+                peer.on('open', () => {
+                    const conn = peer.connect(hostId);
+                    
+                    conn.on('open', () => {
+                        statusEl.textContent = '정상 연결됨';
+                        statusEl.classList.replace('bg-yellow-400', 'bg-green-500');
+                        statusEl.classList.replace('text-yellow-800', 'text-white');
+                        statusEl.classList.remove('animate-pulse');
+                        
+                        document.getElementById('btn-remote-prev').onclick = () => { conn.send({action: 'prev'}); showSwipeEffect('이전'); };
+                        document.getElementById('btn-remote-next').onclick = () => { conn.send({action: 'next'}); showSwipeEffect('다음'); };
+                        
+                        // 터치 스와이프 로직
+                        let touchStartX = 0;
+                        window.addEventListener('touchstart', e => { touchStartX = e.changedTouches[0].screenX; }, {passive: true});
+                        window.addEventListener('touchend', e => {
+                            let touchEndX = e.changedTouches[0].screenX;
+                            if(touchStartX - touchEndX > 50) { conn.send({action: 'next'}); showSwipeEffect('다음'); } // 왼쪽 스와이프
+                            if(touchEndX - touchStartX > 50) { conn.send({action: 'prev'}); showSwipeEffect('이전'); } // 오른쪽 스와이프
+                        }, {passive: true});
+                    });
+                    
+                    conn.on('data', data => {
+                        if(data.type === 'image') {
+                            imgEl.src = data.data;
+                        }
+                    });
+                    
+                    conn.on('close', () => {
+                        statusEl.textContent = '연결 끊김';
+                        statusEl.classList.replace('bg-green-500', 'bg-red-500');
+                    });
+
+                    conn.on('error', err => {
+                        console.error("Connection error:", err);
+                        statusEl.textContent = '통신 오류';
+                        statusEl.classList.replace('bg-green-500', 'bg-red-500');
+                    });
+                });
+
+                peer.on('error', err => {
+                    console.error("Remote Peer 에러:", err);
+                    statusEl.textContent = '서버 통신 실패';
+                    statusEl.classList.replace('bg-yellow-400', 'bg-red-500');
+                });
+                
+                peer.on('disconnected', () => {
+                    if (!peer.destroyed) peer.reconnect();
+                });
+
+            } catch(e) {
+                console.error("Remote Init Error", e);
+                statusEl.textContent = '초기화 실패';
+                statusEl.classList.replace('bg-yellow-400', 'bg-red-500');
+            }
+            
+            function showSwipeEffect(text) {
+                overlayText.textContent = text;
+                overlayEl.style.opacity = '1';
+                setTimeout(() => { overlayEl.style.opacity = '0'; }, 300);
+            }
+        }
+
+        async function openFilesOrZip(preSelectedHandles = null) {
+            try {
+                const fileHandles = preSelectedHandles || await window.showOpenFilePicker({
+                    multiple: true,
+                    types: [{
+                        description: '이미지 및 ZIP 파일',
+                        accept: { 
+                            'image/*': ['.jpg', '.jpeg', '.png', '.webp', '.dng', '.cr2', '.cr3', '.nef', '.arw', '.raf', '.orf', '.rw2', '.pef', '.srw'],
+                            'application/zip': ['.zip']
+                        }
+                    }]
+                });
+
+                if (fileHandles.length === 1 && fileHandles[0].name.toLowerCase().endsWith('.zip')) {
+                    await loadZipFile(await fileHandles[0].getFile());
+                    return;
+                }
+
+                isZipMode = false; allFiles = []; viewedFilesSet.clear(); srcDirHandle = null; 
+                loadedContextId = 'files_' + fileHandles.length + '_' + fileHandles[0].name;
+                ui.headerTitle.textContent = `📸 ${fileHandles.length}개의 파일 로드됨`;
+                ui.btnOpenDest.disabled = false; showToast('파일 불러오는 중...');
+
+                for (const handle of fileHandles) {
+                    if (IMG_EXT_REGEX.test(handle.name.toLowerCase())) {
+                        allFiles.push({ handle: handle, name: handle.name, rating: 0, label: '', xmpLoaded: false, isZip: false });
+                    }
+                }
+                
+                if (allFiles.length > 0) await afterFilesLoaded();
+                else showToast('지원되는 이미지가 없습니다.');
+            } catch (error) {
+                if (error.name === 'NotAllowedError') showToast('접근 권한이 거부되었습니다.', true);
+                else if (error.name !== 'AbortError') showToast('열기 취소/오류', true);
+            }
+        }
+
+        async function loadZipFile(file) {
+            if (typeof JSZip === 'undefined') { showToast('인터넷 연결 필요'); return; }
+            isZipMode = true; allFiles = []; viewedFilesSet.clear(); srcDirHandle = null;
+            loadedContextId = 'zip_' + file.name; ui.headerTitle.textContent = "📸 " + file.name; showToast('ZIP 압축 해제 중...');
+            try {
+                const zip = await JSZip.loadAsync(file);
+                zip.forEach((path, entry) => {
+                    if (!entry.dir && IMG_EXT_REGEX.test(path)) {
+                        allFiles.push({ name: path, entry: entry, rating: 0, label: '', xmpLoaded: true, isZip: true });
+                    }
+                });
+                ui.dropMsg.textContent = `ZIP 로드됨: ${file.name}`; ui.dropZone.style.display = 'flex';
+                await afterFilesLoaded();
+            } catch (err) { showToast('ZIP 읽기 실패'); }
+        }
+
+        async function openSourceDirectory(handle = null) {
+            try {
+                if (!handle) { srcDirHandle = await window.showDirectoryPicker({ mode: 'readwrite' }); }
+                else {
+                    srcDirHandle = handle;
+                    if (!(await verifyPermission(srcDirHandle, true))) {
+                        showToast('폴더 접근 권한이 거부되었습니다.', true); srcDirHandle = null; return;
+                    }
+                }
+                isZipMode = false; viewedFilesSet.clear(); loadedContextId = 'dir_' + srcDirHandle.name;
+                ui.headerTitle.textContent = "📸 " + srcDirHandle.name; ui.btnOpenDest.disabled = false;
+                await loadFilesFromDirectory();
+            } catch (error) { 
+                if (error.name === 'NotAllowedError') showToast('접근 권한이 거부되었습니다.', true);
+                else if (error.name !== 'AbortError') showToast('열기 오류', true); 
+            }
+        }
+
+        async function openDestDirectory() {
+            try {
+                destDirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+                ui.btnOpenDest.textContent = "셀렉 대상: " + destDirHandle.name;
+                ui.btnOpenDest.classList.replace('bg-blue-600', 'bg-gray-700'); ui.btnMove.disabled = false; 
+                showToast(`셀렉 폴더 설정됨. 중복 파일 확인 중...`);
+
+                if (allFiles.length > 0) {
+                    ui.loadingIndicator.classList.remove('hidden'); ui.loadingIndicator.textContent = "확인 중...";
+                    let matchCount = 0;
+                    for (const f of allFiles) {
+                        try { await destDirHandle.getFileHandle(f.name); f.isCopied = true; matchCount++; } catch (e) {}
+                    }
+                    
+                    ui.loadingIndicator.classList.add('hidden'); ui.loadingIndicator.textContent = "읽는 중...";
+                    if (matchCount > 0) { renderFileList(); showToast(`대상 폴더에 이미 ${matchCount}개의 사진이 존재합니다.`); }
+                    else showToast(`셀렉 폴더 설정 완료`);
+                    updateDashboard();
+                }
+            } catch (error) {
+                if (error.name === 'NotAllowedError') showToast('접근 권한이 거부되었습니다.', true);
+            }
+        }
+
+        async function loadFilesFromDirectory() {
+            allFiles = []; showToast('파일 불러오는 중...');
+            try {
+                for await (const entry of srcDirHandle.values()) {
+                    if (entry.kind === 'file' && IMG_EXT_REGEX.test(entry.name.toLowerCase())) {
+                        allFiles.push({ handle: entry, name: entry.name, rating: 0, label: '', xmpLoaded: false, isZip: false });
+                    }
+                }
+                await afterFilesLoaded();
+            } catch (error) { showToast('읽기 오류'); }
+        }
+
+        async function afterFilesLoaded() {
+            allFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+            filteredFiles = [...allFiles];
+            
+            await loadViewedProgress(); 
+            
+            if (filteredFiles.length > 0) {
+                ui.dropZone.style.display = 'none'; ui.viewerContainer.style.display = 'flex';
+                ui.btnPrev.classList.remove('hidden'); ui.btnNext.classList.remove('hidden');
+                ui.btnToggleSidebar.classList.remove('hidden');
+                
+                if (isSidebarVisible) ui.sidebar.classList.remove('hidden');
+                else ui.sidebar.classList.add('hidden');
+                
+                currentIndex = 0; selectedIndices.clear(); selectedIndices.add(currentIndex); lastSelectedIndex = currentIndex;
+                displayCurrentImage(); renderFileList(); updateDashboard();
+                if (!isZipMode) loadAllMetadataInBackground();
+            } else { showToast('지원되는 이미지가 없습니다.'); clearDisplay(); }
+        }
+
+        function getBaseScale(mode) {
+            const wRect = ui.imageWrapper.getBoundingClientRect();
+            const natW = ui.mainImage.naturalWidth; const natH = ui.mainImage.naturalHeight;
+            if (!natW || !natH) return 1;
+
+            const isRotated = Math.abs(transformState.rotate) % 180 === 90;
+            const visualW = isRotated ? natH : natW; const visualH = isRotated ? natW : natH;
+            const scaleX = wRect.width / visualW; const scaleY = wRect.height / visualH;
+
+            if (mode === 'width') return scaleX;
+            if (mode === 'height') return scaleY;
+            return Math.min(scaleX, scaleY); 
+        }
+
+        async function getExifOrientation(blob) {
+            try { return await exifr.orientation(blob) || 1; } catch(e) { return 1; }
+        }
+
+        async function extractJpegFromRaw(fileBlob) {
+            try {
+                const buffer = await fileBlob.arrayBuffer();
+                const view = new Uint8Array(buffer); const len = view.length;
+
+                if (len > 88 && view[0] === 0x46 && view[1] === 0x55 && view[2] === 0x4A && view[3] === 0x49) {
+                    const jpgOffset = (view[84]<<24 | view[85]<<16 | view[86]<<8 | view[87]) >>> 0;
+                    const jpgLen = (view[88]<<24 | view[89]<<16 | view[90]<<8 | view[91]) >>> 0;
+                    if (jpgOffset > 0 && jpgLen > 0 && jpgOffset + jpgLen <= len) {
+                        return URL.createObjectURL(new Blob([view.subarray(jpgOffset, jpgOffset + jpgLen)], { type: 'image/jpeg' }));
+                    }
+                }
+
+                let maxJpgStart = -1, maxJpgEnd = -1, maxJpgSize = 0;
+                for (let i = 0; i < len - 4; i++) {
+                    if (view[i] === 0xFF && view[i+1] === 0xD8 && view[i+2] === 0xFF) {
+                        let offset = i + 2; let foundEnd = false; let isValid = true;
+                        while (offset < len - 1) {
+                            if (view[offset] === 0xFF) {
+                                let marker = view[offset + 1];
+                                if (marker === 0x00 || marker === 0xFF) { offset++; continue; }
+                                if (marker >= 0xD0 && marker <= 0xD7) { offset += 2; continue; }
+                                if (marker === 0xD9) { offset += 2; foundEnd = true; break; }
+                                if (marker === 0xDA) { 
+                                    let sosEnd = false;
+                                    for (let j = offset + 2; j < len - 1; j++) {
+                                        if (view[j] === 0xFF && view[j+1] === 0xD9) { offset = j + 2; foundEnd = true; sosEnd = true; break; }
+                                    }
+                                    break; 
+                                }
+                                if ((marker >= 0xC0 && marker <= 0xFE) && marker !== 0xD9 && marker !== 0xDA) {
+                                    if (offset + 3 >= len) { isValid = false; break; }
+                                    let segLen = (view[offset + 2] << 8) | view[offset + 3];
+                                    if (segLen < 2) { isValid = false; break; }
+                                    offset += 2 + segLen; continue;
+                                }
+                                offset += 2;
+                            } else offset++;
+                        }
+                        
+                        if (foundEnd && isValid) {
+                            let size = offset - i;
+                            if (size > maxJpgSize) { maxJpgSize = size; maxJpgStart = i; maxJpgEnd = offset; }
+                            i = offset - 1; 
+                        }
+                    }
+                }
+                if (maxJpgStart !== -1 && maxJpgSize > 20000) {
+                    return URL.createObjectURL(new Blob([view.subarray(maxJpgStart, maxJpgEnd)], { type: 'image/jpeg' }));
+                }
+            } catch(err) { console.error("RAW 스캔 파서 오류", err); }
+            return null;
+        }
+
+        async function readXmpFromJpeg(fileBlob) {
+            try {
+                const buffer = await fileBlob.arrayBuffer(); const view = new DataView(buffer);
+                if (view.getUint16(0) !== 0xFFD8) return { rating: 0, label: '' };
+                let offset = 2;
+                while (offset < view.byteLength) {
+                    const marker = view.getUint16(offset);
+                    if (marker === 0xFFDA || (marker & 0xFF00) !== 0xFF00) break;
+                    const length = view.getUint16(offset + 2);
+                    if (marker === 0xFFE1 && length >= 31) {
+                        const header = new TextDecoder().decode(buffer.slice(offset + 4, offset + 33));
+                        if (header.startsWith("http://ns.adobe.com/xap/1.0/")) {
+                            const xmpText = new TextDecoder().decode(buffer.slice(offset + 33, offset + 2 + length));
+                            const rMatch = xmpText.match(/xmp:Rating="(\d)"/);
+                            const lMatch = xmpText.match(/xmp:Label="([^"]+)"/);
+                            return { rating: rMatch ? parseInt(rMatch[1]) : 0, label: lMatch ? lMatch[1] : '' };
+                        }
+                    }
+                    offset += 2 + length;
+                }
+            } catch (e) {} return { rating: 0, label: '' };
+        }
+
+        async function injectXmpIntoJpeg(fileBlob, rating, label) {
+            const buffer = await fileBlob.arrayBuffer(); const view = new DataView(buffer);
+            if (view.getUint16(0) !== 0xFFD8) return fileBlob;
+            const segments = []; let offset = 2;
+            while (offset < view.byteLength) {
+                const marker = view.getUint16(offset);
+                if (marker === 0xFFDA || (marker & 0xFF00) !== 0xFF00) { segments.push(buffer.slice(offset)); break; }
+                const length = view.getUint16(offset + 2);
+                if (marker === 0xFFE1 && length >= 31) {
+                    const header = new TextDecoder().decode(buffer.slice(offset + 4, offset + 33));
+                    if (header.startsWith("http://ns.adobe.com/xap/1.0/")) { offset += 2 + length; continue; }
+                }
+                segments.push(buffer.slice(offset, offset + 2 + length)); offset += 2 + length;
+            }
+            const xmpContent = getXmpContentString(rating, label);
+            const encoder = new TextEncoder();
+            const xmpBytes = encoder.encode(xmpContent); const headerBytes = encoder.encode("http://ns.adobe.com/xap/1.0/\0");
+            const app1Length = 2 + headerBytes.length + xmpBytes.length;
+            const newApp1 = new Uint8Array(2 + app1Length);
+            newApp1[0] = 0xFF; newApp1[1] = 0xE1; newApp1[2] = (app1Length >> 8) & 0xFF; newApp1[3] = app1Length & 0xFF;
+            newApp1.set(headerBytes, 4); newApp1.set(xmpBytes, 4 + headerBytes.length);
+            return new Blob([new Uint8Array([0xFF, 0xD8]), newApp1, ...segments], { type: 'image/jpeg' });
+        }
+
+        const makeCRCTable = function() {
+            let c; let crcTable = [];
+            for(let n = 0; n < 256; n++){
+                c = n;
+                for(let k = 0; k < 8; k++){ c = ((c&1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1)); }
+                crcTable[n] = c;
+            }
+            return crcTable;
+        };
+        const pngCrcTable = makeCRCTable();
+        const crc32 = function(arr, offset, length) {
+            let crc = 0 ^ (-1);
+            for (let i = offset; i < offset + length; i++ ) crc = (crc >>> 8) ^ pngCrcTable[(crc ^ arr[i]) & 0xFF];
+            return (crc ^ (-1)) >>> 0;
+        };
+
+        async function injectXmpIntoPng(fileBlob, rating, label) {
+            const buffer = await fileBlob.arrayBuffer(); const view = new Uint8Array(buffer);
+            if (view[0]!==0x89 || view[1]!==0x50 || view[2]!==0x4E || view[3]!==0x47) return fileBlob;
+
+            const xmpContent = getXmpContentString(rating, label);
+            const encoder = new TextEncoder(); const xmpBytes = encoder.encode(xmpContent);
+            const keyword = encoder.encode("XML:com.adobe.xmp");
+            const payload = new Uint8Array(keyword.length + 5 + xmpBytes.length);
+            payload.set(keyword, 0); payload.set(xmpBytes, keyword.length + 5);
+
+            const type = encoder.encode("iTXt");
+            const chunkData = new Uint8Array(4 + payload.length);
+            chunkData.set(type, 0); chunkData.set(payload, 4);
+            const crc = crc32(chunkData, 0, chunkData.length);
+            
+            const chunk = new Uint8Array(4 + chunkData.length + 4);
+            const chunkView = new DataView(chunk.buffer);
+            chunkView.setUint32(0, payload.length, false);
+            chunk.set(chunkData, 4); chunkView.setUint32(4 + chunkData.length, crc, false);
+
+            const segments = []; segments.push(view.subarray(0, 33)); segments.push(chunk); segments.push(view.subarray(33));
+            return new Blob(segments, { type: 'image/png' });
+        }
+
+        async function loadAllMetadataInBackground() {
+            if(isZipMode) return;
+            ui.loadingIndicator.classList.remove('hidden');
+            const chunkSize = 20;
+            for (let i = 0; i < allFiles.length; i += chunkSize) {
+                const chunk = allFiles.slice(i, i + chunkSize);
+                await Promise.all(chunk.map(async (file) => {
+                    if(file.xmpLoaded) return;
+                    try {
+                        const fileData = await file.handle.getFile();
+                        if (file.name.toLowerCase().match(/\.(jpe?g)$/i)) {
+                            const meta = await readXmpFromJpeg(fileData);
+                            file.rating = meta.rating; file.label = meta.label;
+                        } else {
+                            if (!srcDirHandle) return; 
+                            const xmpName = file.name.substring(0, file.name.lastIndexOf('.')) + '.xmp';
+                            try {
+                                const xmpFile = await (await srcDirHandle.getFileHandle(xmpName)).getFile();
+                                const text = await xmpFile.text();
+                                const rMatch = text.match(/xmp:Rating="(\d)"/);
+                                const lMatch = text.match(/xmp:Label="([^"]+)"/);
+                                if (rMatch) file.rating = parseInt(rMatch[1]);
+                                if (lMatch) file.label = lMatch[1];
+                            } catch (e) {} 
+                        }
+                    } catch (e) {}
+                    file.xmpLoaded = true;
+                }));
+                if (ui.filterRating.value !== 'all' || ui.filterLabel.value !== 'all') applyFilters(false);
+                else renderFileList();
+            }
+            ui.loadingIndicator.classList.add('hidden'); applyFilters();
+        }
+
+        function applyFilters(forceRefresh = true) {
+            const r = ui.filterRating.value, l = ui.filterLabel.value, v = ui.filterViewed.value;
+            const prevName = filteredFiles[currentIndex]?.name;
+            filteredFiles = allFiles.filter(f => {
+                const pr = r === 'all' || (r === '0' ? f.rating === 0 : f.rating >= parseInt(r));
+                const pl = l === 'all' || (l === 'none' ? f.label === '' : f.label === l);
+                const pv = v === 'all' || (v === 'unviewed' ? !viewedFilesSet.has(f.name) : viewedFilesSet.has(f.name));
+                return pr && pl && pv;
+            });
+            
+            selectedIndices.clear();
+            if (forceRefresh) {
+                if (filteredFiles.length > 0) {
+                    currentIndex = Math.max(0, filteredFiles.findIndex(f => f.name === prevName));
+                    selectedIndices.add(currentIndex); lastSelectedIndex = currentIndex;
+                    ui.viewerContainer.style.display = 'flex'; ui.dropZone.style.display = 'none';
+                    displayCurrentImage();
+                } else {
+                    ui.viewerContainer.style.display = 'none'; ui.dropZone.style.display = 'flex';
+                    ui.dropMsg.textContent = "조건에 맞는 이미지가 없습니다."; ui.mainImage.src = '';
+                }
+                renderFileList();
+            }
+        }
+
+        function renderFileList() {
+            ui.fileList.innerHTML = '';
+            filteredFiles.forEach((f, idx) => {
+                const li = document.createElement('li');
+                li.className = `file-list-item flex items-center justify-between px-2 py-1.5 rounded cursor-pointer text-sm mb-0.5`;
+                li.draggable = true;
+                li.addEventListener('dragstart', (e) => { e.dataTransfer.setData('application/x-photo-index', idx); });
+
+                li.innerHTML = `
+                    <div class="flex items-center flex-1 min-w-0">
+                        ${f.isCopied ? '<span class="bg-green-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded mr-1.5 shrink-0 leading-none">SELECT</span>' : ''}
+                        ${!viewedFilesSet.has(f.name) ? '<span class="unviewed-dot w-1.5 h-1.5 bg-blue-500 rounded-full mr-1.5 shrink-0 shadow-[0_0_4px_rgba(59,130,246,0.8)]" title="미열람"></span>' : ''}
+                        <span class="truncate flex-1">${f.name}</span>
+                    </div>
+                    <div class="flex items-center space-x-1.5 shrink-0 ml-2">
+                        ${f.rating > 0 ? `<span class="text-yellow-400 text-xs font-bold">★${f.rating}</span>` : ''}
+                        ${f.label !== '' ? `<span class="w-2 h-2 rounded-full ${labelColorMap[f.label] || 'bg-gray-500'}"></span>` : ''}
+                    </div>`;
+                
+                li.onclick = (e) => { 
+                    if (e.shiftKey) {
+                        const min = Math.min(lastSelectedIndex, idx); const max = Math.max(lastSelectedIndex, idx);
+                        selectedIndices.clear(); for (let i = min; i <= max; i++) selectedIndices.add(i);
+                        currentIndex = idx;
+                    } else if (e.ctrlKey || e.metaKey) {
+                        if (selectedIndices.has(idx)) selectedIndices.delete(idx); else selectedIndices.add(idx);
+                        currentIndex = idx; lastSelectedIndex = idx;
+                    } else {
+                        selectedIndices.clear(); selectedIndices.add(idx);
+                        currentIndex = idx; lastSelectedIndex = idx;
+                    }
+                    if (selectedIndices.size === 0) selectedIndices.add(currentIndex);
+                    displayCurrentImage(); 
+                };
+                ui.fileList.appendChild(li);
+            });
+            updateListSelection();
+        }
+
+        function updateListSelection() {
+            const items = ui.fileList.querySelectorAll('li');
+            let allSelected = filteredFiles.length > 0;
+
+            items.forEach((li, idx) => {
+                const isSelected = selectedIndices.has(idx);
+                const isActive = idx === currentIndex;
+                
+                const dot = li.querySelector('.unviewed-dot');
+                if (dot && viewedFilesSet.has(filteredFiles[idx].name)) dot.remove();
+
+                if (isSelected) {
+                    li.classList.add('bg-blue-800', 'text-white'); li.classList.remove('text-gray-300', 'hover:bg-gray-800');
+                } else {
+                    li.classList.remove('bg-blue-800', 'text-white'); li.classList.add('text-gray-300', 'hover:bg-gray-800');
+                    allSelected = false;
+                }
+                
+                if (isActive) {
+                    li.classList.add('ring-2', 'ring-blue-400'); li.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                } else li.classList.remove('ring-2', 'ring-blue-400');
+            });
+            
+            ui.chkSelectAll.checked = allSelected && filteredFiles.length > 0;
+            ui.fileCounter.textContent = filteredFiles.length > 0 ? `${currentIndex + 1} / ${filteredFiles.length} (${selectedIndices.size}개 선택)` : `0 / 0`;
+        }
+
+        async function displayCurrentImage() {
+            if (currentIndex < 0 || currentIndex >= filteredFiles.length) return;
+            const fileObj = filteredFiles[currentIndex];
+            ui.fileName.textContent = fileObj.name; updateListSelection();
+            
+            if (!viewedFilesSet.has(fileObj.name)) { viewedFilesSet.add(fileObj.name); saveViewedProgress(); }
+            updateDashboard();
+
+            ui.errorMsg.classList.add('hidden'); ui.mainImage.classList.remove('hidden');
+
+            try {
+                if (currentObjectUrl) URL.revokeObjectURL(currentObjectUrl);
+                
+                const fileData = fileObj.isZip ? await fileObj.entry.async("blob") : await fileObj.handle.getFile();
+                const isRawFormat = !fileObj.name.toLowerCase().match(/\.(jpe?g|png|webp)$/i);
+                
+                let targetBlob = fileData; currentObjectUrl = null;
+                updateExifDisplay(targetBlob);
+
+                if (isRawFormat) {
+                    try {
+                        const extractedUrl = await extractJpegFromRaw(fileData);
+                        if (extractedUrl) { currentObjectUrl = extractedUrl; } 
+                        else if (typeof exifr !== 'undefined') {
+                            const thumbUrl = await exifr.thumbnailUrl(fileData);
+                            if (thumbUrl) { currentObjectUrl = thumbUrl; } else throw new Error();
+                        } else throw new Error();
+                    } catch (e) { console.error("미리보기 실패", e); }
+                } else { currentObjectUrl = URL.createObjectURL(fileData); }
+                
+                let rot = 0, fx = 1, fy = 1;
+                if (isRawFormat && isExifAutoRotateEnabled) {
+                    const orientation = await getExifOrientation(targetBlob);
+                    switch(orientation) {
+                        case 2: fx = -1; break; case 3: rot = 180; break; case 4: rot = 180; fx = -1; break;
+                        case 5: rot = 90; fx = -1; break; case 6: rot = 90; break;
+                        case 7: rot = -90; fx = -1; break; case 8: rot = -90; break;
+                    }
+                }
+                transformState = { rotate: rot, flipX: fx, flipY: fy };
+
+                ui.mainImage.onload = () => {
+                    ui.mainImage.classList.remove('hidden'); ui.errorMsg.classList.add('hidden');
+                    if (viewMode === 'custom') {
+                        setSmoothTransform(false); requestAnimationFrame(() => { clampPan(); applyTransform(); });
+                    } else { setSmoothTransform(false); resetTransform(); }
+                    
+                    // 리모컨이 연결되어 있다면 모바일 화면으로 저화질 썸네일 전송
+                    syncWithRemote();
+                };
+                
+                if (currentObjectUrl) {
+                    ui.mainImage.src = currentObjectUrl; ui.navImg.src = currentObjectUrl; ui.loupeImg.src = currentObjectUrl;
+                } else showErrorState();
+
+                currentRating = fileObj.rating; currentLabel = fileObj.label; updateUIState();
+            } catch (error) { showErrorState(); }
+        }
+
+        async function loadRefImage(fileObj) {
+            try {
+                if (currentRefObjectUrl) URL.revokeObjectURL(currentRefObjectUrl);
+                const fileData = fileObj.isZip ? await fileObj.entry.async("blob") : await fileObj.handle.getFile();
+                const isRawFormat = !fileObj.name.toLowerCase().match(/\.(jpe?g|png|webp)$/i);
+                
+                let targetBlob = fileData; currentRefObjectUrl = null;
+
+                if (isRawFormat) {
+                    try {
+                        const extractedUrl = await extractJpegFromRaw(fileData);
+                        if (extractedUrl) { currentRefObjectUrl = extractedUrl; } 
+                        else if (typeof exifr !== 'undefined') {
+                            const thumbUrl = await exifr.thumbnailUrl(fileData);
+                            if (thumbUrl) { currentRefObjectUrl = thumbUrl; } else throw new Error();
+                        } else throw new Error();
+                    } catch (e) { console.error("비교 미리보기 실패", e); }
+                } else { currentRefObjectUrl = URL.createObjectURL(fileData); }
+                
+                let rot = 0, fx = 1, fy = 1;
+                if (isRawFormat && isExifAutoRotateEnabled) {
+                    const orientation = await getExifOrientation(targetBlob);
+                    switch(orientation) {
+                        case 2: fx = -1; break; case 3: rot = 180; break; case 4: rot = 180; fx = -1; break;
+                        case 5: rot = 90; fx = -1; break; case 6: rot = 90; break;
+                        case 7: rot = -90; fx = -1; break; case 8: rot = -90; break;
+                    }
+                }
+                refTransformState = { rotate: rot, flipX: fx, flipY: fy };
+
+                ui.refImage.onload = () => {
+                    ui.refImage.classList.remove('hidden'); ui.refEmptyMsg.classList.add('hidden');
+                    if (refZoomMulti === 1) resetRefTransform(); else { clampRefPan(); applyRefTransform(); }
+                };
+                
+                if (currentRefObjectUrl) ui.refImage.src = currentRefObjectUrl;
+                else { ui.refEmptyMsg.classList.remove('hidden'); ui.refEmptyMsg.textContent = "미리보기를 불러올 수 없습니다."; }
+            } catch (error) { 
+                console.error(error); ui.refEmptyMsg.classList.remove('hidden'); ui.refEmptyMsg.textContent = "이미지를 불러올 수 없습니다.";
+            }
+        }
+
+        function showErrorState() {
+            ui.mainImage.src = ''; ui.navImg.src = ''; ui.loupeImg.src = '';
+            ui.mainImage.classList.add('hidden'); ui.errorMsg.classList.remove('hidden');
+            if(ui.statExif) ui.statExif.textContent = '-'; showToast('미리보기를 불러올 수 없습니다.', true);
+        }
+
+        function clearDisplay() {
+            ui.mainImage.src = ''; ui.navImg.src = ''; ui.loupeImg.src = ''; ui.fileName.textContent = '파일 없음';
+            ui.refImage.src = ''; ui.refImage.classList.add('hidden'); ui.refEmptyMsg.classList.remove('hidden');
+            currentIndex = -1; ui.dropZone.style.display = 'flex'; ui.viewerContainer.style.display = 'none';
+            ui.sidebar.classList.add('hidden'); allFiles = []; filteredFiles = []; ui.fileList.innerHTML = '';
+            ui.errorMsg.classList.add('hidden');
+            if(ui.statExif) ui.statExif.textContent = '-'; loadedContextId = ''; viewedFilesSet.clear();
+            if (ui.statDashboard) ui.statDashboard.classList.replace('flex', 'hidden');
+        }
+
+        function navigate(direction) {
+            if (filteredFiles.length === 0) return;
+            currentIndex = (currentIndex + direction + filteredFiles.length) % filteredFiles.length;
+            selectedIndices.clear(); selectedIndices.add(currentIndex); lastSelectedIndex = currentIndex;
+            displayCurrentImage();
+        }
+
+        function handleWheelZoom(e) {
+            e.preventDefault();
+            if (isLoupeActive && filteredFiles.length > 0) {
+                const delta = -e.deltaY; let lFactor = 1.1;
+                if (loupeRelativeScale < 3.0) lFactor = 1.05; else if (loupeRelativeScale > 8.0) lFactor = 1.15;
+                const factor = delta > 0 ? lFactor : (1 / lFactor);
+                loupeRelativeScale *= factor; loupeRelativeScale = Math.max(0.5, Math.min(loupeRelativeScale, 15)); 
+                updateLoupe(e); return;
+            }
+            if (filteredFiles.length === 0) return;
+            setSmoothTransform(false); 
+
+            // 핏 모드에서 휠 굴릴 시 갑자기 튀는 현상 방지
+            if (viewMode !== 'custom') {
+                zoomMulti = getBaseScale(viewMode) / getBaseScale('fit');
+                viewMode = 'custom';
+            }
+
+            const delta = -e.deltaY; let stepMultiplier = 0.0015;
+            if (zoomMulti < 1.5) stepMultiplier = 0.0007; else if (zoomMulti >= 3.0) stepMultiplier = 0.0025;
+
+            const scaleStep = Math.abs(delta) * stepMultiplier;
+            let newMulti = zoomMulti * (delta > 0 ? (1 + scaleStep) : (1 / (1 + scaleStep)));
+            newMulti = Math.max(0.1, Math.min(newMulti, 20));
+
+            const rect = ui.imageWrapper.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left; const mouseY = e.clientY - rect.top;
+            const centerX = rect.width / 2; const centerY = rect.height / 2;
+            const offsetX = mouseX - (centerX + panX); const offsetY = mouseY - (centerY + panY);
+
+            if (newMulti !== zoomMulti) {
+                const ratio = newMulti / zoomMulti;
+                panX -= offsetX * (ratio - 1); panY -= offsetY * (ratio - 1);
+            }
+            zoomMulti = newMulti; lastCustomZoomMulti = zoomMulti; viewMode = 'custom';
+            if (zoomMulti > 1.05 && !isNavVisible && !userClosedNav) toggleNavigator(true);
+            else if (zoomMulti <= 1.05 && isNavVisible && !userClosedNav) toggleNavigator(false);
+            updateZoomUI();
+        }
+
+        function startDrag(e) {
+            if (e.button !== 0 || isLoupeActive) return; 
+            isDragging = true; isClick = true; startX = e.clientX - panX; startY = e.clientY - panY; setSmoothTransform(false); 
+            if (ui.imageWrapper.setPointerCapture) ui.imageWrapper.setPointerCapture(e.pointerId);
+        }
+
+        function getRefBaseScale() {
+            const wRect = ui.refWrapper.getBoundingClientRect();
+            const natW = ui.refImage.naturalWidth; const natH = ui.refImage.naturalHeight;
+            if (!natW || !natH) return 1;
+
+            const isRotated = Math.abs(refTransformState.rotate) % 180 === 90;
+            const visualW = isRotated ? natH : natW; const visualH = isRotated ? natW : natH;
+            const scaleX = wRect.width / visualW; const scaleY = wRect.height / visualH;
+
+            return Math.min(scaleX, scaleY); 
+        }
+
+        function clampRefPan() {
+            if (refZoomMulti <= 1.0) {
+                refPanX = 0; refPanY = 0;
+                return;
+            }
+            const wRect = ui.refWrapper.getBoundingClientRect();
+            const natW = ui.refImage.naturalWidth; const natH = ui.refImage.naturalHeight;
+            if (!natW || !natH) return;
+            
+            const isRotated = Math.abs(refTransformState.rotate) % 180 === 90;
+            const visualW = isRotated ? natH : natW; const visualH = isRotated ? natW : natH;
+            
+            const finalScale = getRefBaseScale() * refZoomMulti;
+            const scaledW = visualW * finalScale; const scaledH = visualH * finalScale;
+            
+            const maxPanX = Math.max(0, (scaledW - wRect.width) / 2);
+            const maxPanY = Math.max(0, (scaledH - wRect.height) / 2);
+            
+            refPanX = Math.max(-maxPanX, Math.min(maxPanX, refPanX));
+            refPanY = Math.max(-maxPanY, Math.min(maxPanY, refPanY));
+        }
+
+        function applyRefTransform() {
+            clampRefPan();
+            const finalScale = getRefBaseScale() * refZoomMulti;
+            ui.refImage.style.transform = `translate(calc(-50% + ${refPanX}px), calc(-50% + ${refPanY}px)) scale(${finalScale}) rotate(${refTransformState.rotate}deg) scaleX(${refTransformState.flipX}) scaleY(${refTransformState.flipY})`;
+        }
+
+        function resetRefTransform() { 
+            refZoomMulti = 1; refPanX = 0; refPanY = 0; applyRefTransform(); 
+        }
+
+        function handleRefWheelZoom(e) {
+            e.preventDefault();
+            if (!currentRefObjectUrl) return;
+            ui.refImage.classList.remove('smooth-transform');
+            
+            const delta = -e.deltaY; let stepMultiplier = 0.0015;
+            if (refZoomMulti < 1.5) stepMultiplier = 0.0007; else if (refZoomMulti >= 3.0) stepMultiplier = 0.0025;
+
+            const scaleStep = Math.abs(delta) * stepMultiplier;
+            let newMulti = refZoomMulti * (delta > 0 ? (1 + scaleStep) : (1 / (1 + scaleStep)));
+            newMulti = Math.max(0.1, Math.min(newMulti, 20));
+
+            const rect = ui.refWrapper.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left; const mouseY = e.clientY - rect.top;
+            const centerX = rect.width / 2; const centerY = rect.height / 2;
+            const offsetX = mouseX - (centerX + refPanX); const offsetY = mouseY - (centerY + refPanY);
+
+            if (newMulti !== refZoomMulti) {
+                const ratio = newMulti / refZoomMulti;
+                refPanX -= offsetX * (ratio - 1); refPanY -= offsetY * (ratio - 1);
+            }
+            refZoomMulti = newMulti; applyRefTransform();
+        }
+
+        function startRefDrag(e) {
+            if (e.button !== 0 || !currentRefObjectUrl) return; 
+            isRefDragging = true; refStartX = e.clientX - refPanX; refStartY = e.clientY - refPanY;
+            ui.refImage.classList.remove('smooth-transform');
+            if (ui.refWrapper.setPointerCapture) ui.refWrapper.setPointerCapture(e.pointerId);
+        }
+
+        function drag(e) {
+            if (isDragging) {
+                e.preventDefault();
+                if (Math.abs((e.clientX - panX) - startX) > 3 || Math.abs((e.clientY - panY) - startY) > 3) isClick = false;
+                panX = e.clientX - startX; 
+                panY = e.clientY - startY; 
+                clampPan();
+                startX = e.clientX - panX;
+                startY = e.clientY - panY;
+                if (animationFrameId) cancelAnimationFrame(animationFrameId);
+                animationFrameId = requestAnimationFrame(applyTransform);
+            }
+            if (isRefDragging) {
+                e.preventDefault();
+                refPanX = e.clientX - refStartX; 
+                refPanY = e.clientY - refStartY; 
+                clampRefPan();
+                refStartX = e.clientX - refPanX;
+                refStartY = e.clientY - refPanY;
+                if (refAnimationFrameId) cancelAnimationFrame(refAnimationFrameId);
+                refAnimationFrameId = requestAnimationFrame(applyRefTransform);
+            }
+        }
+
+        function endDrag(e) {
+            if (isDragging) {
+                isDragging = false; if (animationFrameId) cancelAnimationFrame(animationFrameId);
+                if (isClick && e.button === 0) handleLeftClickZoom(e); else { clampPan(); applyTransform(); }
+            }
+            if (isRefDragging) {
+                isRefDragging = false; if (refAnimationFrameId) cancelAnimationFrame(refAnimationFrameId);
+                clampRefPan(); applyRefTransform();
+            }
+        }
+
+        function handleLeftClickZoom(e) {
+            if (isLoupeActive || filteredFiles.length === 0) return;
+            setSmoothTransform(true);
+            
+            if (viewMode === 'custom') { viewMode = 'fit'; zoomMulti = 1; resetTransform(); } 
+            else {
+                const rect = ui.imageWrapper.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left; const mouseY = e.clientY - rect.top;
+                
+                const currentScale = getBaseScale(viewMode) / getBaseScale('fit');
+                const targetMulti = lastCustomZoomMulti > 1.05 ? lastCustomZoomMulti : 2.5;
+                const offsetX = mouseX - rect.width / 2; const offsetY = mouseY - rect.height / 2;
+                
+                panX = -offsetX * (targetMulti / currentScale); 
+                panY = -offsetY * (targetMulti / currentScale);
+                
+                zoomMulti = targetMulti; viewMode = 'custom'; 
+                if (!isNavVisible && !userClosedNav) toggleNavigator(true);
+                updateZoomUI();
+            }
+        }
+
+        function clampPan() {
+            const wRect = ui.imageWrapper.getBoundingClientRect();
+            const natW = ui.mainImage.naturalWidth; const natH = ui.mainImage.naturalHeight;
+            if (!natW || !natH) return;
+            
+            const isRotated = Math.abs(transformState.rotate) % 180 === 90;
+            const visualW = isRotated ? natH : natW; const visualH = isRotated ? natW : natH;
+            const finalScale = getBaseScale(viewMode === 'custom' ? 'fit' : viewMode) * zoomMulti;
+            const scaledW = visualW * finalScale; const scaledH = visualH * finalScale;
+            
+            // 사진의 끝부분 1픽셀만 화면에 걸치게 허용 (화면 절반 + 이미지 절반 - 1px)
+            const maxPanX = (wRect.width / 2) + (scaledW / 2) - 1;
+            const maxPanY = (wRect.height / 2) + (scaledH / 2) - 1;
+            
+            panX = Math.max(-maxPanX, Math.min(maxPanX, panX));
+            panY = Math.max(-maxPanY, Math.min(maxPanY, panY));
+        }
+
+        function applyTransform() {
+            clampPan();
+            const finalScale = getBaseScale(viewMode === 'custom' ? 'fit' : viewMode) * zoomMulti;
+            ui.mainImage.style.transform = `translate(calc(-50% + ${panX}px), calc(-50% + ${panY}px)) scale(${finalScale}) rotate(${transformState.rotate}deg) scaleX(${transformState.flipX}) scaleY(${transformState.flipY})`;
+            updateNavigator();
+        }
+
+        function updateZoomUI() {
+            applyTransform(); ui.zoomSelect.value = "custom";
+            const customOpt = ui.zoomSelect.querySelector('option[value="custom"]');
+            customOpt.textContent = `사용자 (${Math.round(zoomMulti * 100)}%)`; customOpt.hidden = false;
+        }
+
+        function resetTransform() {
+            zoomMulti = 1; panX = 0; panY = 0; applyTransform(); ui.zoomSelect.value = viewMode;
+            if (isNavVisible && !userClosedNav) toggleNavigator(false);
+        }
+
+        function toggleNavigator(forceState) {
+            isNavVisible = forceState !== undefined ? forceState : !isNavVisible;
+            ui.navPanel.style.display = isNavVisible ? 'block' : 'none';
+            if(isNavVisible) updateNavigator();
+        }
+
+        function updateNavigator() {
+            if (!isNavVisible || filteredFiles.length === 0) return;
+            
+            const wRect = ui.imageWrapper.getBoundingClientRect();
+            const natW = ui.mainImage.naturalWidth; const natH = ui.mainImage.naturalHeight;
+            if (!natW || !natH) return;
+            
+            const isRotated = Math.abs(transformState.rotate) % 180 === 90;
+            const visualW = isRotated ? natH : natW; const visualH = isRotated ? natW : natH;
+            const navRect = ui.navContent.getBoundingClientRect();
+            const scaleX = navRect.width / visualW; const scaleY = navRect.height / visualH;
+            const navScale = Math.min(scaleX, scaleY) * 0.9;
+            
+            ui.navImg.style.transform = `translate(-50%, -50%) scale(${navScale}) rotate(${transformState.rotate}deg) scaleX(${transformState.flipX}) scaleY(${transformState.flipY})`;
+            
+            const finalScale = getBaseScale('fit') * zoomMulti;
+            const vpW = (wRect.width / finalScale) * navScale; const vpH = (wRect.height / finalScale) * navScale;
+            
+            const vpX = navRect.width/2 - vpW/2 - (panX / finalScale) * navScale;
+            const vpY = navRect.height/2 - vpH/2 - (panY / finalScale) * navScale;
+
+            ui.navViewport.style.width = `${vpW}px`; ui.navViewport.style.height = `${vpH}px`;
+            ui.navViewport.style.left = `${vpX}px`; ui.navViewport.style.top = `${vpY}px`;
+        }
+
+        function setupNavigatorDrag() {
+            let isNavDragging = false, nStartX, nStartY, nInitLeft, nInitTop;
+            ui.btnCloseNav.addEventListener('pointerdown', e => e.stopPropagation()); 
+            
+            ui.navHeader.addEventListener('pointerdown', (e) => {
+                isNavDragging = true; nStartX = e.clientX; nStartY = e.clientY;
+                const style = window.getComputedStyle(ui.navPanel);
+                nInitLeft = parseInt(style.left, 10); if(isNaN(nInitLeft)) nInitLeft = ui.navPanel.offsetLeft;
+                nInitTop = parseInt(style.top, 10); if(isNaN(nInitTop)) nInitTop = ui.navPanel.offsetTop;
+                ui.navPanel.style.right = 'auto'; 
+                if (ui.navHeader.setPointerCapture) ui.navHeader.setPointerCapture(e.pointerId);
+            });
+            window.addEventListener('pointermove', (e) => {
+                if (!isNavDragging) return;
+                ui.navPanel.style.left = `${nInitLeft + (e.clientX - nStartX)}px`; ui.navPanel.style.top = `${nInitTop + (e.clientY - nStartY)}px`;
+            });
+            window.addEventListener('pointerup', () => isNavDragging = false);
+            window.addEventListener('pointercancel', () => isNavDragging = false);
+
+            ui.navContent.addEventListener('click', (e) => {
+                if (filteredFiles.length === 0 || viewMode !== 'custom') return;
+                const imgRect = ui.navImg.getBoundingClientRect();
+                
+                const natW = ui.mainImage.naturalWidth; const natH = ui.mainImage.naturalHeight;
+                const isRotated = Math.abs(transformState.rotate) % 180 === 90;
+                const visualW = isRotated ? natH : natW; const visualH = isRotated ? natW : natH;
+                const navAspect = imgRect.width / imgRect.height; const imgAspect = visualW / visualH;
+                
+                let renderW, renderH;
+                if (imgAspect > navAspect) { renderW = imgRect.width; renderH = imgRect.width / imgAspect; } 
+                else { renderH = imgRect.height; renderW = imgRect.height * imgAspect; }
+                
+                const renderLeft = imgRect.left + (imgRect.width - renderW) / 2;
+                const renderTop = imgRect.top + (imgRect.height - renderH) / 2;
+                
+                let relX = (e.clientX - renderLeft) / renderW - 0.5; let relY = (e.clientY - renderTop) / renderH - 0.5;
+                relX = Math.max(-0.5, Math.min(0.5, relX)); relY = Math.max(-0.5, Math.min(0.5, relY));
+                
+                const finalScale = getBaseScale('fit') * zoomMulti;
+                const currentImgW = visualW * finalScale; const currentImgH = visualH * finalScale;
+                
+                panX = -(relX * currentImgW); panY = -(relY * currentImgH);
+                setSmoothTransform(true); updateZoomUI();
+            });
+        }
+
+        function toggleLoupe(active) {
+            isLoupeActive = active;
+            ui.loupe.style.display = active && filteredFiles.length > 0 ? 'block' : 'none';
+            ui.mainImage.style.opacity = active ? '0.5' : '1';
+            
+            if (active) {
+                ui.imageWrapper.classList.add('loupe-active');
+                loupeRelativeScale = Math.max(1.5, loupeRelativeScale);
+            } else ui.imageWrapper.classList.remove('loupe-active');
+        }
+
+        function updateLoupe(e) {
+            if (!isLoupeActive || filteredFiles.length === 0) return;
+            const wRect = ui.imageWrapper.getBoundingClientRect();
+            const mouseX = e.clientX - wRect.left; const mouseY = e.clientY - wRect.top;
+            
+            ui.loupe.style.left = `${mouseX - 125}px`; ui.loupe.style.top = `${mouseY - 125}px`;
+
+            const baseScale = getBaseScale('fit'); const renderScale = baseScale * zoomMulti;
+            const lScale = baseScale * zoomMulti * loupeRelativeScale;
+            const dx = mouseX - wRect.width/2; const dy = mouseY - wRect.height/2;
+            const ratio = lScale / renderScale;
+            
+            const lPanX = (panX - dx) * ratio; const lPanY = (panY - dy) * ratio;
+            ui.loupeImg.style.transform = `translate(calc(-50% + ${lPanX}px), calc(-50% + ${lPanY}px)) scale(${lScale}) rotate(${transformState.rotate}deg) scaleX(${transformState.flipX}) scaleY(${transformState.flipY})`;
+        }
+
+        async function updateMetadata(rating, label) {
+            if (filteredFiles.length === 0) return;
+            
+            const fileObj = filteredFiles[currentIndex];
+            currentRating = rating; currentLabel = label; updateUIState();
+            fileObj.rating = rating; fileObj.label = label; renderFileList();
+
+            if (isZipMode) { showToast('ZIP 모드: 파일에 저장되지 않고 임시 적용됩니다.'); return; }
+
+            try {
+                if (srcDirHandle) {
+                    if (await verifyPermission(srcDirHandle, true) === false) { showToast('권한이 없어 임시 적용만 되었습니다.', true); return; }
+                } else {
+                    if (await verifyPermission(fileObj.handle, true) === false) { showToast('권한이 없어 임시 적용만 되었습니다.', true); return; }
+                }
+
+                const isJpg = fileObj.name.toLowerCase().match(/\.(jpe?g)$/i);
+                const isPng = fileObj.name.toLowerCase().match(/\.(png)$/i);
+                const isWebp = fileObj.name.toLowerCase().match(/\.(webp)$/i);
+
+                if (isWebp) { showToast(`WEBP는 직접 저장을 지원하지 않습니다.`, true); return; }
+
+                if (isJpg || isPng) {
+                    let handleToWrite = fileObj.handle;
+                    try { if (srcDirHandle) handleToWrite = await srcDirHandle.getFileHandle(fileObj.name); } catch (e) { }
+
+                    const fileData = await handleToWrite.getFile(); let newBlob;
+                    if (isJpg) newBlob = await injectXmpIntoJpeg(fileData, rating, label);
+                    else newBlob = await injectXmpIntoPng(fileData, rating, label);
+
+                    const writable = await handleToWrite.createWritable();
+                    await writable.write(newBlob); await writable.close();
+                    showToast(`${isJpg ? 'JPG' : 'PNG'} 파일에 메타데이터 저장됨`);
+                } else {
+                    if (!srcDirHandle) { showToast('개별 모드: XMP 저장은 폴더 열기가 필요합니다.', true); return; }
+                    const baseName = fileObj.name.substring(0, fileObj.name.lastIndexOf('.'));
+                    const xmpName = baseName + '.xmp';
+                    const xmpContent = getXmpContentString(rating, label);
+                    const fileHandle = await srcDirHandle.getFileHandle(xmpName, { create: true });
+                    const writable = await fileHandle.createWritable();
+                    await writable.write(xmpContent); await writable.close();
+                    showToast(`RAW XMP 파일 저장됨: 별점 ${rating}, 라벨 ${label || '없음'}`);
+                }
+            } catch (err) { console.error(err); showToast('메타데이터 저장에 실패했습니다.'); }
+        }
+
+        async function moveSelectedFiles() {
+            if (!destDirHandle || filteredFiles.length === 0 || selectedIndices.size === 0) return;
+            if (isZipMode) { showToast('ZIP 모드에서는 셀렉(복사)할 수 없습니다.', true); return; }
+            
+            try {
+                if (await verifyPermission(destDirHandle, true) === false) { showToast('대상 폴더 권한이 필요합니다.', true); return; }
+                
+                ui.loadingIndicator.classList.remove('hidden'); ui.loadingIndicator.textContent = "작업 중...";
+                const indicesToProcess = Array.from(selectedIndices).sort((a,b) => b - a);
+                let copiedCount = 0; let removedCount = 0;
+
+                for (const idx of indicesToProcess) {
+                    const fileObj = filteredFiles[idx];
+                    const baseName = fileObj.name.substring(0, fileObj.name.lastIndexOf('.'));
+                    const xmpName = baseName + '.xmp';
+                    
+                    if (fileObj.isCopied) {
+                        try {
+                            await destDirHandle.removeEntry(fileObj.name);
+                            try { await destDirHandle.removeEntry(xmpName); } catch(e) {}
+                            fileObj.isCopied = false;
+                            const origIdx = allFiles.findIndex(f => f.name === fileObj.name);
+                            if (origIdx > -1) allFiles[origIdx].isCopied = false;
+                            removedCount++;
+                        } catch (e) { console.error('삭제 실패', e); }
+                    } else {
+                        const sourceFile = await fileObj.handle.getFile();
+                        const destFileHandle = await destDirHandle.getFileHandle(fileObj.name, { create: true });
+                        const w = await destFileHandle.createWritable();
+                        await w.write(sourceFile); await w.close();
+                        
+                        if (srcDirHandle) {
+                            try {
+                                const xmpFile = await (await srcDirHandle.getFileHandle(xmpName)).getFile();
+                                const xw = await (await destDirHandle.getFileHandle(xmpName, { create: true })).createWritable();
+                                await xw.write(xmpFile); await xw.close();
+                            } catch(e) {}
+                        }
+                        fileObj.isCopied = true;
+                        const origIdx = allFiles.findIndex(f => f.name === fileObj.name);
+                        if (origIdx > -1) allFiles[origIdx].isCopied = true;
+                        copiedCount++;
+                    }
+                }
+                
+                selectedIndices.clear(); selectedIndices.add(currentIndex); lastSelectedIndex = currentIndex;
+                ui.loadingIndicator.classList.add('hidden'); ui.loadingIndicator.textContent = "읽는 중...";
+                renderFileList(); updateDashboard();
+                
+                if (copiedCount > 0 && removedCount > 0) showToast(`${copiedCount}개 셀렉 / ${removedCount}개 취소`);
+                else if (copiedCount > 0) showToast(`${copiedCount}개 사진 셀렉 완료`);
+                else if (removedCount > 0) showToast(`${removedCount}개 셀렉 취소됨`);
+
+            } catch (error) { 
+                console.error(error); ui.loadingIndicator.classList.add('hidden'); showToast('셀렉 중 오류 발생'); 
+            }
+        }
+
+        function updateUIState() {
+            const stars = ui.ratingContainer.children;
+            for (let i = 0; i < stars.length; i++) stars[i].classList.toggle('text-yellow-400', i < currentRating);
+            for (let i = 0; i < stars.length; i++) stars[i].classList.toggle('text-gray-600', i >= currentRating);
+            document.querySelectorAll('.label-btn').forEach(btn => btn.classList.toggle('label-active', btn.dataset.label === currentLabel && currentLabel !== ''));
+        }
+
+        function getXmpContentString(rating, label) {
+            let attrs = [];
+            if (rating > 0) attrs.push(`xmp:Rating="${rating}"`);
+            if (label) {
+                let lrLabel = label; let urgency = 0;
+                if (label === 'Red') { lrLabel = '빨강'; urgency = 1; }
+                else if (label === 'Yellow') { lrLabel = '노랑'; urgency = 2; }
+                else if (label === 'Green') { lrLabel = '초록'; urgency = 3; }
+                else if (label === 'Blue') { lrLabel = '파랑'; urgency = 4; }
+                else if (label === 'Purple') { lrLabel = '보라'; urgency = 5; }
+                attrs.push(`xmp:Label="${lrLabel}"`);
+                if (urgency > 0) attrs.push(`photoshop:Urgency="${urgency}"`);
+            }
+            const attrString = attrs.length > 0 ? ' ' + attrs.join(' ') : '';
+            return `<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>\n<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.6">\n <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">\n  <rdf:Description rdf:about="" xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmlns:photoshop="http://ns.adobe.com/photoshop/1.0/"${attrString}/>\n </rdf:RDF>\n</x:xmpmeta>\n<?xpacket end="w"?>`;
+        }
+
+        function getXmpExportTargets() {
+            const targets = [];
+            for (const idx of selectedIndices) {
+                const f = filteredFiles[idx];
+                if (f.name.toLowerCase().match(/\.(jpe?g|png)$/i) && (f.rating > 0 || f.label !== '')) {
+                    const baseName = f.name.substring(0, f.name.lastIndexOf('.'));
+                    targets.push({ baseName, rating: f.rating, label: f.label });
+                }
+            }
+            return targets;
+        }
+
+        async function exportXmpIndividually() {
+            const targets = getXmpExportTargets();
+            if(targets.length === 0) { showToast('선택된 항목 중 메타데이터가 있는 JPG/PNG가 없습니다.', true); return; }
+            if(targets.length > 10 && !srcDirHandle) { showToast('10개 이상의 파일은 ZIP 압축 다운로드를 권장합니다.'); }
+            
+            if (srcDirHandle && await verifyPermission(srcDirHandle, true)) {
+                try {
+                    for (const t of targets) {
+                        const xmpContent = getXmpContentString(t.rating, t.label);
+                        const fileHandle = await srcDirHandle.getFileHandle(`${t.baseName}.xmp`, { create: true });
+                        const writable = await fileHandle.createWritable();
+                        await writable.write(xmpContent); await writable.close();
+                    }
+                    showToast(`${targets.length}개의 XMP 파일이 원본 폴더에 저장되었습니다.`); return;
+                } catch(e) { console.error('폴더 직접 저장 실패, 일반 다운로드로 전환합니다.', e); }
+            }
+
+            targets.forEach((t, i) => {
+                setTimeout(() => {
+                    const xmpContent = getXmpContentString(t.rating, t.label);
+                    const blob = new Blob([xmpContent], { type: 'application/rdf+xml' });
+                    const url = URL.createObjectURL(blob); const a = document.createElement('a');
+                    a.href = url; a.download = `${t.baseName}.xmp`;
+                    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+                }, i * 150); 
+            });
+            showToast(`${targets.length}개의 XMP 다운로드를 시작합니다.`);
+        }
+
+        async function exportXmpAsZip() {
+            const targets = getXmpExportTargets();
+            if(targets.length === 0) { showToast('선택된 항목 중 메타데이터가 있는 JPG/PNG가 없습니다.', true); return; }
+            
+            showToast('ZIP 파일 생성 중...'); const zip = new JSZip();
+            targets.forEach(t => { zip.file(`${t.baseName}.xmp`, getXmpContentString(t.rating, t.label)); });
+            
+            try {
+                const content = await zip.generateAsync({type: "blob"});
+                if (srcDirHandle && await verifyPermission(srcDirHandle, true)) {
+                    try {
+                        const fileHandle = await srcDirHandle.getFileHandle('metadata_xmp.zip', { create: true });
+                        const writable = await fileHandle.createWritable();
+                        await writable.write(content); await writable.close();
+                        showToast(`${targets.length}개의 XMP가 원본 폴더에 ZIP으로 저장되었습니다.`); return;
+                    } catch (e) { console.error('폴더 직접 저장 실패, 일반 다운로드로 전환합니다.', e); }
+                }
+
+                const url = URL.createObjectURL(content); const a = document.createElement('a');
+                a.href = url; a.download = 'metadata_xmp.zip';
+                document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+                showToast(`${targets.length}개의 XMP가 ZIP으로 다운로드되었습니다.`);
+            } catch (err) { showToast('ZIP 생성 실패', true); }
+        }
+
+        async function exportSelectedFilenamesToTxt() {
+            if (selectedIndices.size === 0 || filteredFiles.length === 0) { showToast('선택된 파일이 없습니다.', true); return; }
+
+            const indices = Array.from(selectedIndices).sort((a, b) => a - b);
+            const fileNames = indices.map(idx => filteredFiles[idx].name).join('\n');
+            const blob = new Blob([fileNames], { type: 'text/plain;charset=utf-8' });
+            
+            if (srcDirHandle && await verifyPermission(srcDirHandle, true)) {
+                try {
+                    const fileHandle = await srcDirHandle.getFileHandle('selected_photos.txt', { create: true });
+                    const writable = await fileHandle.createWritable();
+                    await writable.write(blob); await writable.close();
+                    showToast(`${indices.length}개 파일명이 원본 폴더에 TXT로 저장되었습니다.`); return;
+                } catch (e) { console.error('폴더 직접 저장 실패, 일반 다운로드로 전환합니다.', e); }
+            }
+
+            const url = URL.createObjectURL(blob); const a = document.createElement('a');
+            a.href = url; a.download = 'selected_photos.txt';
+            document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+            showToast(`${indices.length}개 파일명이 다운로드되었습니다.`);
+        }
+
+        function showToast(m, isError = false) {
+            if (!ui.toast) return;
+            ui.toast.textContent = m; ui.toast.style.backgroundColor = isError ? 'rgba(239, 68, 68, 0.9)' : 'rgba(0,0,0,0.8)';
+            ui.toast.style.opacity = '1'; clearTimeout(window.toastTimeout);
+            window.toastTimeout = setTimeout(() => { ui.toast.style.opacity = '0'; }, 2000);
+        }
+
+        // --- 초기화(Init) 함수 ---
+        function init() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const remoteId = urlParams.get('remote');
+            
+            if (remoteId) {
+                initRemoteMode(remoteId);
+                return; // PC UI 초기화 건너뜀
+            }
+
+            // 상단, 하단 툴바 드래그 스크롤 활성화
+            enableDragScroll('#top-toolbar');
+            enableDragScroll('#bottom-toolbar');
+
+            document.querySelectorAll('button').forEach(btn => {
+                btn.addEventListener('click', function(e) { if(this.id !== 'btn-shortcuts-key') this.blur(); });
+            });
+
+            for (let i = 1; i <= 5; i++) {
+                const star = document.createElement('button');
+                // 모바일 환경을 고려하여 별 모양의 너비와 높이를 작게 조절
+                star.innerHTML = '<svg class="w-3.5 h-3.5 sm:w-6 sm:h-6" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path></svg>';
+                star.className = 'star-btn star-inactive focus:outline-none'; star.dataset.rating = i; star.id = `tip-rate${i}`;
+                star.addEventListener('click', () => updateMetadata(i, currentLabel));
+                ui.ratingContainer.appendChild(star);
+            }
+
+            // 클라우드에서 불러온 설정 적용
+            updateExifToggleUI();
+            if (isSidebarVisible) ui.sidebar.classList.remove('hidden');
+            else ui.sidebar.classList.add('hidden');
+            renderShortcutsList();
+            updateDashboard();
+
+            if(ui.btnMainOpenFolder) ui.btnMainOpenFolder.addEventListener('click', () => openSourceDirectory());
+            if(ui.btnMainOpenFiles) ui.btnMainOpenFiles.addEventListener('click', () => openFilesOrZip());
+            if (ui.btnSidebarAddFolder) ui.btnSidebarAddFolder.addEventListener('click', () => openSourceDirectory());
+            if (ui.btnSidebarAddFiles) ui.btnSidebarAddFiles.addEventListener('click', () => openFilesOrZip());
+            
+            ui.btnOpenDest.addEventListener('click', () => openDestDirectory());
+            
+            ui.btnToggleSidebar.addEventListener('click', () => {
+                isSidebarVisible = !isSidebarVisible;
+                saveSettingsToCloud();
+                if (isSidebarVisible) ui.sidebar.classList.remove('hidden');
+                else ui.sidebar.classList.add('hidden');
+            });
+            
+            // WebRTC QR 팝업
+            ui.btnRemoteMode.addEventListener('click', initHostPeer);
+            ui.btnCloseQr.addEventListener('click', () => ui.qrModal.classList.replace('flex', 'hidden'));
+            
+            ui.btnToggleNav.addEventListener('click', () => { toggleNavigator(); userClosedNav = !isNavVisible; });
+            ui.btnCloseNav.addEventListener('click', () => { toggleNavigator(false); userClosedNav = true; });
+            ui.btnFullscreen.addEventListener('click', toggleFullscreen);
+            ui.filterRating.addEventListener('change', applyFilters);
+            ui.filterLabel.addEventListener('change', applyFilters);
+            ui.filterViewed.addEventListener('change', applyFilters);
+            ui.btnMove.addEventListener('click', (e) => { e.preventDefault(); moveSelectedFiles(); });
+            ui.btnPrev.addEventListener('click', () => navigate(-1));
+            ui.btnNext.addEventListener('click', () => navigate(1));
+
+            ui.btnToggleExif.addEventListener('click', () => {
+                isExifAutoRotateEnabled = !isExifAutoRotateEnabled;
+                saveSettingsToCloud();
+                updateExifToggleUI();
+                if (currentIndex >= 0 && filteredFiles.length > 0) displayCurrentImage();
+            });
+
+            ui.btnRotLeft.addEventListener('click', () => { transformState.rotate = (transformState.rotate - 90) % 360; setSmoothTransform(true); updateZoomUI(); });
+            ui.btnRotRight.addEventListener('click', () => { transformState.rotate = (transformState.rotate + 90) % 360; setSmoothTransform(true); updateZoomUI(); });
+            ui.btnFlipH.addEventListener('click', () => { transformState.flipX *= -1; setSmoothTransform(true); updateZoomUI(); });
+            ui.btnFlipV.addEventListener('click', () => { transformState.flipY *= -1; setSmoothTransform(true); updateZoomUI(); });
+
+            ui.mainImage.onerror = () => { if (ui.mainImage.src && ui.mainImage.src !== window.location.href && ui.mainImage.src !== 'about:blank') showErrorState(); };
+
+            ui.chkSelectAll.addEventListener('change', (e) => {
+                if (e.target.checked) filteredFiles.forEach((_, i) => selectedIndices.add(i));
+                else { selectedIndices.clear(); if(currentIndex !== -1) selectedIndices.add(currentIndex); }
+                updateListSelection();
+            });
+
+            ui.btnExportTxt.addEventListener('click', exportSelectedFilenamesToTxt);
+            if (ui.btnExportXmpSingle) ui.btnExportXmpSingle.addEventListener('click', exportXmpIndividually);
+            if (ui.btnExportXmpZip) ui.btnExportXmpZip.addEventListener('click', exportXmpAsZip);
+
+            ui.zoomSelect.addEventListener('change', (e) => {
+                const val = e.target.value;
+                if (['fit', 'width', 'height'].includes(val)) {
+                    viewMode = val; zoomMulti = 1; panX = 0; panY = 0;
+                    setSmoothTransform(true); resetTransform();
+                } else if (val !== 'custom') {
+                    viewMode = 'custom'; zoomMulti = parseFloat(val); panX = 0; panY = 0;
+                    lastCustomZoomMulti = zoomMulti;
+                    setSmoothTransform(true); updateZoomUI();
+                }
+            });
+
+            ui.bgColorPicker.addEventListener('input', (e) => {
+                ui.mainArea.style.backgroundColor = e.target.value;
+                saveSettingsToCloud();
+            });
+            
+            document.querySelectorAll('button[data-bg]').forEach(btn => btn.addEventListener('click', (e) => {
+                ui.mainArea.style.backgroundColor = e.target.dataset.bg; 
+                ui.bgColorPicker.value = e.target.dataset.bg;
+                saveSettingsToCloud();
+            }));
+
+            // 마우스 대신 터치와 마우스를 통합 지원하는 Pointer Event로 대체
+            ui.imageWrapper.addEventListener('wheel', handleWheelZoom, { passive: false });
+            ui.imageWrapper.addEventListener('pointerdown', startDrag);
+            ui.imageWrapper.addEventListener('pointermove', updateLoupe);
+
+            ui.refWrapper.addEventListener('wheel', handleRefWheelZoom, { passive: false });
+            ui.refWrapper.addEventListener('pointerdown', startRefDrag);
+
+            window.addEventListener('pointermove', drag, { passive: false });
+            window.addEventListener('pointerup', endDrag);
+            window.addEventListener('pointercancel', endDrag);
+
+            window.addEventListener('resize', () => {
+                if(viewMode !== 'custom') resetTransform();
+                else updateZoomUI();
+                if(isCompareMode && currentRefObjectUrl) resetRefTransform();
+            });
+
+            document.querySelectorAll('.label-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const targetLabel = e.target.dataset.label;
+                    updateMetadata(currentRating, currentLabel === targetLabel ? '' : targetLabel);
+                });
+            });
+
+            window.addEventListener('keydown', handleKeydown);
+            window.addEventListener('keyup', handleKeyup);
+            setupDragAndDrop();
+            setupRefDragAndDrop();
+            setupFullscreenHover();
+            setupNavigatorDrag();
+
+            ui.btnShortcuts.addEventListener('click', () => ui.modal.classList.remove('hidden'));
+            ui.btnCloseModal.addEventListener('click', () => { ui.modal.classList.add('hidden'); cancelBinding(); });
+            ui.modal.addEventListener('click', (e) => { if (e.target === ui.modal) { ui.modal.classList.add('hidden'); cancelBinding(); } });
+            ui.btnResetShortcuts.addEventListener('click', () => { userShortcuts = { ...defaultShortcuts }; saveSettingsToCloud(); renderShortcutsList(); showToast('단축키가 기본값으로 초기화되었습니다.'); });
+            
+            updateUIState();
+
+            // 스크린 세이버 이벤트 리스너 등록
+            ['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart'].forEach(evt => {
+                window.addEventListener(evt, resetIdleTimer, { passive: true });
+            });
+            resetIdleTimer();
+        }
+
+        window.onload = async () => {
+            if (useCloud) {
+                try {
+                    // 클라우드 계정 연동 및 설정 불러오기
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        const cred = await signInWithCustomToken(auth, __initial_auth_token);
+                        currentUserId = cred.user.uid;
+                    } else {
+                        const cred = await signInAnonymously(auth);
+                        currentUserId = cred.user.uid;
+                    }
+                    
+                    if (currentUserId) {
+                        await loadSettingsFromCloud();
+                    }
+                } catch (err) {
+                    console.error("Cloud DB Init failed:", err);
+                    showToast("클라우드 연동 실패. 일부 설정이 저장되지 않을 수 있습니다.", true);
+                }
+            }
+            init(); // 이제 오프라인(로컬) 상태여도 init() 함수가 정상적으로 호출됩니다.
+        };
+
+    </script>
+</body>
+</html>
