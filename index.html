@@ -454,13 +454,12 @@
                 <button id="btn-remote-local-open" class="hidden px-3 py-1.5 bg-purple-600 hover:bg-purple-500 rounded text-[10px] sm:text-xs font-bold ml-1 text-white">파일열기</button>
                 <button id="btn-remote-local-exit" class="hidden px-2 py-1.5 bg-red-600 hover:bg-red-500 rounded text-[10px] sm:text-xs font-bold ml-1 text-white">종료</button>
             </div>
-            <div class="text-center font-bold text-xs sm:text-sm truncate px-2 flex-1 text-emerald-400" id="remote-filename">연결 중...</div>
+            <div class="text-center font-bold text-xs sm:text-sm truncate px-2 flex-1 text-emerald-400 hidden" id="remote-filename">연결 중...</div>
+            <div class="flex-1"></div>
             <div class="flex items-center space-x-1 shrink-0">
-                <button id="btn-remote-local-dest" class="hidden px-2 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-[10px] font-bold text-white">대상폴더</button>
-                <button id="btn-remote-local-move" class="hidden px-5 sm:px-6 py-1.5 bg-gray-700 rounded text-xs font-bold text-white tracking-widest">셀렉</button>
+                <button id="btn-remote-local-action" class="hidden px-5 sm:px-6 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-bold text-white tracking-widest transition-colors">대상폴더</button>
                 <button id="btn-remote-help" class="flex items-center justify-center w-6 h-6 bg-gray-700 hover:bg-gray-600 rounded-full text-xs font-bold transition-colors">?</button>
-                <button id="btn-remote-fit" class="px-2 py-1.5 bg-blue-600 rounded text-[10px] font-bold transition-colors">화면맞춤</button>
-                <button id="btn-remote-width" class="px-2 py-1.5 bg-gray-700 rounded text-[10px] font-bold transition-colors">폭맞춤</button>
+                <button id="btn-remote-view-toggle" class="px-2 sm:px-3 py-1.5 bg-blue-600 rounded text-[10px] sm:text-xs font-bold transition-colors">화면맞춤</button>
             </div>
         </div>
 
@@ -1445,22 +1444,6 @@
         function updateRemoteLocalUI() {
             const fileObj = filteredFiles[currentIndex];
             const imgEl = document.getElementById('remote-img');
-            const filenameEl = document.getElementById('remote-filename');
-            
-            filenameEl.textContent = `${currentIndex + 1}/${filteredFiles.length} - ${fileObj.name}`;
-            filenameEl.classList.replace('text-emerald-400', 'text-white');
-            
-            // Update stars and labels for local mode sync
-            document.querySelectorAll('.remote-star-btn').forEach(btn => {
-                const val = parseInt(btn.dataset.val);
-                if(val === 0) return;
-                if (val <= currentRating) { btn.classList.add('text-yellow-400'); btn.classList.remove('text-gray-500'); } 
-                else { btn.classList.add('text-gray-500'); btn.classList.remove('text-yellow-400'); }
-            });
-            document.querySelectorAll('.remote-label-btn').forEach(btn => {
-                if(btn.dataset.val === currentLabel) { btn.classList.add('border-white'); btn.classList.remove('border-transparent'); } 
-                else { btn.classList.remove('border-white'); btn.classList.add('border-transparent'); }
-            });
             
             imgEl.onload = () => {
                 updateRemoteScale();
@@ -1556,13 +1539,18 @@
                 document.getElementById('remote-list-overlay').classList.replace('flex', 'hidden');
             });
             
-            document.getElementById('btn-remote-fit').addEventListener('click', (e) => {
-                e.stopPropagation(); remoteViewMode = 'fit'; remoteScale = 1; remotePanX = 0; remotePanY = 0; updateRemoteScale();
-                document.getElementById('btn-remote-fit').classList.replace('bg-gray-700', 'bg-blue-600'); document.getElementById('btn-remote-width').classList.replace('bg-blue-600', 'bg-gray-700');
-            });
-            document.getElementById('btn-remote-width').addEventListener('click', (e) => {
-                e.stopPropagation(); remoteViewMode = 'width'; remoteScale = 1; remotePanX = 0; remotePanY = 0; updateRemoteScale();
-                document.getElementById('btn-remote-width').classList.replace('bg-gray-700', 'bg-blue-600'); document.getElementById('btn-remote-fit').classList.replace('bg-blue-600', 'bg-gray-700');
+            document.getElementById('btn-remote-view-toggle').addEventListener('click', (e) => {
+                e.stopPropagation(); 
+                if (remoteViewMode === 'fit') {
+                    remoteViewMode = 'width'; 
+                    e.target.textContent = '폭맞춤';
+                    e.target.classList.replace('bg-blue-600', 'bg-purple-600');
+                } else {
+                    remoteViewMode = 'fit'; 
+                    e.target.textContent = '화면맞춤';
+                    e.target.classList.replace('bg-purple-600', 'bg-blue-600');
+                }
+                remoteScale = 1; remotePanX = 0; remotePanY = 0; updateRemoteScale();
             });
 
             document.getElementById('btn-remote-help').addEventListener('click', (e) => {
@@ -1602,16 +1590,14 @@
                 }
             });
 
-            document.getElementById('btn-remote-local-move').addEventListener('click', (e) => {
+            document.getElementById('btn-remote-local-action').addEventListener('click', (e) => {
                 e.stopPropagation();
-                if(isZipMode) showToast('ZIP 내 이미지는 셀렉(복사)할 수 없습니다.');
-                else if (destDirHandle) moveSelectedFiles();
-                else showToast('대상 폴더를 먼저 설정해주세요.');
-            });
-            
-            document.getElementById('btn-remote-local-dest').addEventListener('click', (e) => {
-                e.stopPropagation();
-                openDestDirectory();
+                if (!destDirHandle) {
+                    openDestDirectory();
+                } else {
+                    if(isZipMode) showToast('ZIP 내 이미지는 셀렉(복사)할 수 없습니다.');
+                    else moveSelectedFiles();
+                }
             });
 
             function showSwipeEffect(text) {
@@ -1640,8 +1626,12 @@
                     tapTimer = setTimeout(() => { 
                         remoteScale = 1; remotePanX = 0; remotePanY = 0; remoteViewMode = 'fit';
                         updateRemoteScale();
-                        document.getElementById('btn-remote-fit').className = "px-2 py-1.5 bg-blue-600 rounded text-[10px] font-bold transition-colors";
-                        document.getElementById('btn-remote-width').className = "px-2 py-1.5 bg-gray-700 rounded text-[10px] font-bold transition-colors";
+                        const viewToggleBtn = document.getElementById('btn-remote-view-toggle');
+                        if (viewToggleBtn) {
+                            viewToggleBtn.textContent = '화면맞춤';
+                            viewToggleBtn.classList.remove('bg-purple-600');
+                            viewToggleBtn.classList.add('bg-blue-600');
+                        }
                         tapCount = 0; 
                     }, 300);
                 } else if (tapCount === 3) {
@@ -1932,7 +1922,14 @@
                 destDirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
                 ui.btnOpenDest.textContent = "셀렉 대상: " + destDirHandle.name;
                 ui.btnOpenDest.classList.replace('bg-blue-600', 'bg-gray-700'); ui.btnMove.disabled = false;
-                document.getElementById('btn-remote-local-move').classList.replace('bg-gray-700', 'bg-green-600');
+                
+                const mobileActionBtn = document.getElementById('btn-remote-local-action');
+                if(mobileActionBtn) {
+                    mobileActionBtn.textContent = '셀렉';
+                    mobileActionBtn.classList.replace('bg-gray-700', 'bg-green-600');
+                    mobileActionBtn.classList.replace('hover:bg-gray-600', 'hover:bg-green-500');
+                }
+                
                 showToast(`셀렉 폴더 설정됨. 중복 파일 확인 중...`);
 
                 if (allFiles.length > 0) {
@@ -1981,8 +1978,7 @@
                     document.getElementById('remote-view').classList.add('flex');
                     
                     document.getElementById('btn-remote-local-exit').classList.remove('hidden');
-                    document.getElementById('btn-remote-local-dest').classList.remove('hidden');
-                    document.getElementById('btn-remote-local-move').classList.remove('hidden');
+                    document.getElementById('btn-remote-local-action').classList.remove('hidden');
                     document.getElementById('btn-remote-local-open').classList.remove('hidden');
                     
                     const topToolbar = document.getElementById('top-toolbar');
@@ -2933,6 +2929,18 @@
             for (let i = 0; i < stars.length; i++) stars[i].classList.toggle('text-yellow-400', i < currentRating);
             for (let i = 0; i < stars.length; i++) stars[i].classList.toggle('text-gray-600', i >= currentRating);
             document.querySelectorAll('.label-btn').forEach(btn => btn.classList.toggle('label-active', btn.dataset.label === currentLabel && currentLabel !== ''));
+
+            // 모바일 UI에도 등급/라벨 시각적 동기화 적용
+            document.querySelectorAll('.remote-star-btn').forEach(btn => {
+                const val = parseInt(btn.dataset.val);
+                if(val === 0) return;
+                if (val <= currentRating) { btn.classList.add('text-yellow-400'); btn.classList.remove('text-gray-500'); } 
+                else { btn.classList.add('text-gray-500'); btn.classList.remove('text-yellow-400'); }
+            });
+            document.querySelectorAll('.remote-label-btn').forEach(btn => {
+                if(btn.dataset.val === currentLabel) { btn.classList.add('border-white'); btn.classList.remove('border-transparent'); } 
+                else { btn.classList.remove('border-white'); btn.classList.add('border-transparent'); }
+            });
         }
 
         function getXmpContentString(rating, label) {
@@ -3104,8 +3112,7 @@
                 document.getElementById('remote-view').classList.add('flex');
                 
                 document.getElementById('btn-remote-local-exit').classList.remove('hidden');
-                document.getElementById('btn-remote-local-dest').classList.remove('hidden');
-                document.getElementById('btn-remote-local-move').classList.remove('hidden');
+                document.getElementById('btn-remote-local-action').classList.remove('hidden');
                 document.getElementById('btn-remote-local-open').classList.remove('hidden'); // 새 파일열기 버튼 보이기
                 
                 const topToolbar = document.getElementById('top-toolbar');
@@ -3119,9 +3126,6 @@
                     displayCurrentImage();
                     renderLocalMobileList();
                 } else {
-                    const filenameEl = document.getElementById('remote-filename');
-                    filenameEl.textContent = "파일을 열어주세요";
-                    filenameEl.classList.replace('text-emerald-400', 'text-gray-400');
                     document.getElementById('remote-img').src = '';
                 }
             });
