@@ -438,7 +438,7 @@
         <!-- 3그룹: 액션 버튼 -->
         <div class="flex items-center justify-end gap-1 sm:gap-2 shrink-0 ml-auto">
             <button id="btn-open-dest" class="p-1 sm:px-3 sm:py-1.5 text-[10px] sm:text-sm font-medium text-gray-300 bg-gray-700 rounded hover:bg-gray-600 focus:outline-none flex items-center shrink-0" title="셀렉 폴더 설정" disabled>
-                <svg class="w-4 h-4 sm:mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z"></path></svg>
+                <svg class="w-4 h-4 sm:mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 01-2 2z"></path></svg>
                 <span class="hidden sm:inline">대상 폴더</span>
             </button>
             <button id="btn-move" class="p-1 sm:px-4 sm:py-1.5 text-[10px] sm:text-sm font-medium text-white bg-green-700 rounded hover:bg-green-600 disabled:opacity-50 flex items-center shrink-0" title="셀렉 (Enter)">
@@ -1332,7 +1332,7 @@
             }
         }
         
-        // 원본 이미지를 Canvas를 통해 압축/문자열 변환하여 분할 전송 (모바일 호환성 및 속도 100% 확보)
+        // 원본 이미지를 Canvas를 통해 압축/바이너리(ArrayBuffer) 변환하여 분할 전송 (모바일 호환성 및 속도 100% 확보)
         async function syncWithRemote() {
             if (!remoteConn || !remoteConn.open || !ui.mainImage.src || ui.mainImage.src.startsWith('null') || filteredFiles.length === 0) return;
             
@@ -1379,41 +1379,52 @@
                     ctx.drawImage(ui.mainImage, -w/2, -h/2, w, h);
                 }
                 
-                // 고화질 JPEG 문자열 분할 전송
-                const dataUrl = canvas.toDataURL('image/jpeg', 0.85); 
-                
-                if (currentTransferId !== transferId) return; // 전송 도중 새로운 스와이프 발생 시 취소
-
-                const CHUNK_SIZE = 16384; // 16KB 길이 문자열
-                const totalChunks = Math.ceil(dataUrl.length / CHUNK_SIZE);
-
-                // 헤더 전송 (이미 캔버스에 회전이 적용되었으므로 transform 초기화 전달)
-                remoteConn.send({ 
-                    type: 'state_start', 
-                    fileId: transferId, 
-                    fileName: fileObj.name, 
-                    currentIndex, 
-                    total: filteredFiles.length,
-                    totalChunks: totalChunks,
-                    transform: { rotate: 0, flipX: 1, flipY: 1 } 
-                });
-
-                // 문자열 청크 전송
-                for (let i = 0; i < totalChunks; i++) {
-                    if (currentTransferId !== transferId || !remoteConn.open) break;
+                // 고화질 JPEG 변환 후 브라우저 네이티브 ArrayBuffer로 쪼개서 다이렉트 전송 (Base64 변환과정 생략)
+                canvas.toBlob(async (blob) => {
+                    if (currentTransferId !== transferId || !remoteConn.open) return; // 전송 도중 넘어갔으면 취소
                     
-                    const chunkStr = dataUrl.substring(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-                    remoteConn.send({
-                        type: 'state_chunk',
-                        fileId: transferId,
-                        chunkIndex: i,
-                        chunkData: chunkStr
-                    });
-                    
-                    if (i % 20 === 0) await new Promise(r => setTimeout(r, 5)); // 버퍼 오버플로우 방지
-                }
+                    if (blob) {
+                        try {
+                            const arrayBuffer = await blob.arrayBuffer();
+                            const uint8Array = new Uint8Array(arrayBuffer);
+                            const CHUNK_SIZE = 65536; // 64KB 단위 (가장 빠르고 안정적인 사이즈)
+                            const totalChunks = Math.ceil(uint8Array.length / CHUNK_SIZE);
+
+                            // 헤더 전송 (이미 캔버스에 회전이 적용되었으므로 transform 초기화 전달)
+                            remoteConn.send({ 
+                                type: 'state_start_binary', 
+                                fileId: transferId, 
+                                fileName: fileObj.name, 
+                                currentIndex, 
+                                total: filteredFiles.length,
+                                totalChunks: totalChunks,
+                                mimeType: 'image/jpeg',
+                                transform: { rotate: 0, flipX: 1, flipY: 1 } 
+                            });
+
+                            // 바이너리 청크 전송
+                            for (let i = 0; i < totalChunks; i++) {
+                                if (currentTransferId !== transferId || !remoteConn.open) break;
+                                const start = i * CHUNK_SIZE;
+                                const end = Math.min(start + CHUNK_SIZE, uint8Array.length);
+                                const chunk = uint8Array.slice(start, end);
+                                
+                                remoteConn.send({
+                                    type: 'state_chunk_binary',
+                                    fileId: transferId,
+                                    chunkIndex: i,
+                                    chunkData: chunk.buffer // 순수 이진 데이터 전송
+                                });
+                                
+                                if (i % 10 === 0) await new Promise(r => setTimeout(r, 2)); // 버퍼 오버플로우 방지
+                            }
+                        } catch(sendErr) {
+                            console.error('리모컨 이미지 데이터 전송 실패', sendErr);
+                        }
+                    }
+                }, 'image/jpeg', 0.85); // 고화질 85%
             } catch (e) {
-                console.error('리모컨 썸네일 생성 및 전송 에러', e);
+                console.error('리모컨 썸네일 생성 에러', e);
             }
         }
         
@@ -1635,7 +1646,7 @@
                     
                     if (data.type === 'state_loading') {
                         document.getElementById('remote-filename').textContent = `수신 중...`;
-                    } else if (data.type === 'state_start') {
+                    } else if (data.type === 'state_start_binary') {
                         incomingImage[data.fileId] = {
                             chunks: new Array(data.totalChunks),
                             receivedCount: 0,
@@ -1643,10 +1654,11 @@
                             fileName: data.fileName,
                             currentIndex: data.currentIndex,
                             total: data.total,
-                            transform: data.transform
+                            transform: data.transform,
+                            mimeType: data.mimeType
                         };
                         document.getElementById('remote-filename').textContent = `수신 중... 0%`;
-                    } else if (data.type === 'state_chunk') {
+                    } else if (data.type === 'state_chunk_binary') {
                         const imgData = incomingImage[data.fileId];
                         if (!imgData) return; // 취소되거나 옛날 데이터
                         
@@ -1657,9 +1669,10 @@
                         document.getElementById('remote-filename').textContent = `수신 중... ${percent}%`;
                         
                         if (imgData.receivedCount === imgData.totalChunks) {
-                            // 문자열 조립 후 이미지 렌더링
-                            const fullDataUrl = imgData.chunks.join('');
-                            imgEl.src = fullDataUrl;
+                            // 바이너리 데이터 직접 조립 후 이미지 렌더링 (가장 빠름)
+                            const blob = new Blob(imgData.chunks, { type: imgData.mimeType });
+                            if (imgEl.src && imgEl.src.startsWith('blob:')) URL.revokeObjectURL(imgEl.src);
+                            imgEl.src = URL.createObjectURL(blob);
                             
                             document.getElementById('remote-filename').textContent = `${imgData.currentIndex + 1}/${imgData.total} - ${imgData.fileName}`;
                             
