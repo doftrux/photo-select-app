@@ -151,10 +151,10 @@
         </div>
         
         <div class="flex flex-nowrap items-center gap-1 sm:gap-2 shrink-0 ml-auto justify-end">
-            <!-- 모바일 연동 (보안 강화 WebRTC) -->
-            <button id="btn-remote-mode" class="p-1 sm:px-3 sm:py-1.5 text-[10px] sm:text-sm font-medium text-blue-400 border border-blue-600/50 bg-blue-900/20 rounded hover:bg-blue-900/40 transition-colors flex items-center shrink-0" title="스마트폰에 사진 띄우기 (서버에 저장되지 않음)">
+            <!-- 모바일 연동 토글 버튼 (PC 부하 감소용) -->
+            <button id="btn-remote-mode" class="p-1 sm:px-3 sm:py-1.5 text-[10px] sm:text-sm font-medium text-gray-400 border border-gray-600 bg-gray-800 rounded hover:bg-gray-700 transition-colors flex items-center shrink-0" title="스마트폰에 사진 띄우기 (서버에 저장되지 않음)">
                 <svg class="w-4 h-4 sm:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
-                <span class="hidden sm:inline">모바일 연동</span>
+                <span class="hidden sm:inline" id="remote-mode-text">모바일 연동</span>
             </button>
             <div class="w-px h-5 bg-gray-700 hidden sm:block mx-1"></div>
 
@@ -453,34 +453,37 @@
             </div>
         </div>
 
-        <!-- Bottom Bar -->
-        <div id="remote-bottom-bar" class="flex flex-col w-full bg-gray-900/95 absolute bottom-0 left-0 z-50 transition-transform duration-300">
-            <!-- 메타데이터 컨트롤 -->
-            <div class="flex w-full p-2 space-x-2 border-b border-gray-800">
-                <div class="flex justify-between items-center bg-gray-800 rounded-lg p-1.5 border border-gray-700 flex-1">
-                    <button class="remote-star-btn w-8 h-8 flex items-center justify-center rounded text-gray-500 active:bg-gray-700 transition" data-val="1"><svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path></svg></button>
-                    <button class="remote-star-btn w-8 h-8 flex items-center justify-center rounded text-gray-500 active:bg-gray-700 transition" data-val="2"><svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path></svg></button>
-                    <button class="remote-star-btn w-8 h-8 flex items-center justify-center rounded text-gray-500 active:bg-gray-700 transition" data-val="3"><svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path></svg></button>
-                    <button class="remote-star-btn w-8 h-8 flex items-center justify-center rounded text-gray-500 active:bg-gray-700 transition" data-val="4"><svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path></svg></button>
-                    <button class="remote-star-btn w-8 h-8 flex items-center justify-center rounded text-gray-500 active:bg-gray-700 transition" data-val="5"><svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path></svg></button>
-                    <button class="remote-star-btn w-8 h-8 flex items-center justify-center rounded text-gray-500 active:bg-gray-700 transition" data-val="0"><span class="font-bold text-sm">X</span></button>
+        <!-- 합쳐진 모바일 Bottom Bar -->
+        <div id="remote-bottom-bar" class="flex flex-col w-full bg-gray-900/95 absolute bottom-0 left-0 z-50 transition-transform duration-300 pb-2">
+            <div class="flex flex-col p-2 space-y-2">
+                <!-- 1열: 메타데이터 컨트롤 -->
+                <div class="flex w-full space-x-2">
+                    <div class="flex flex-[1.5] justify-around items-center bg-gray-800 rounded-lg p-1.5 border border-gray-700">
+                        <button class="remote-star-btn w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded text-gray-500 active:bg-gray-700 transition" data-val="1"><svg class="w-5 h-5 sm:w-6 sm:h-6" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path></svg></button>
+                        <button class="remote-star-btn w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded text-gray-500 active:bg-gray-700 transition" data-val="2"><svg class="w-5 h-5 sm:w-6 sm:h-6" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path></svg></button>
+                        <button class="remote-star-btn w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded text-gray-500 active:bg-gray-700 transition" data-val="3"><svg class="w-5 h-5 sm:w-6 sm:h-6" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path></svg></button>
+                        <button class="remote-star-btn w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded text-gray-500 active:bg-gray-700 transition" data-val="4"><svg class="w-5 h-5 sm:w-6 sm:h-6" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path></svg></button>
+                        <button class="remote-star-btn w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded text-gray-500 active:bg-gray-700 transition" data-val="5"><svg class="w-5 h-5 sm:w-6 sm:h-6" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path></svg></button>
+                        <button class="remote-star-btn w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded text-gray-500 active:bg-gray-700 transition" data-val="0"><span class="font-bold text-sm">X</span></button>
+                    </div>
+                    <div class="flex flex-1 justify-around items-center bg-gray-800 rounded-lg p-1.5 border border-gray-700">
+                        <button class="remote-label-btn w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-red-500 shadow-md border-2 border-transparent active:border-white transition" data-val="Red"></button>
+                        <button class="remote-label-btn w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-yellow-500 shadow-md border-2 border-transparent active:border-white transition" data-val="Yellow"></button>
+                        <button class="remote-label-btn w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-green-500 shadow-md border-2 border-transparent active:border-white transition" data-val="Green"></button>
+                        <button class="remote-label-btn w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-blue-500 shadow-md border-2 border-transparent active:border-white transition" data-val="Blue"></button>
+                        <button class="remote-label-btn w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-purple-500 shadow-md border-2 border-transparent active:border-white transition" data-val="Purple"></button>
+                    </div>
                 </div>
-                <div class="flex justify-between items-center bg-gray-800 rounded-lg p-1.5 border border-gray-700 flex-1">
-                    <button class="remote-label-btn w-6 h-6 rounded-full bg-red-500 shadow-md border-2 border-transparent active:border-white transition" data-val="Red"></button>
-                    <button class="remote-label-btn w-6 h-6 rounded-full bg-yellow-500 shadow-md border-2 border-transparent active:border-white transition" data-val="Yellow"></button>
-                    <button class="remote-label-btn w-6 h-6 rounded-full bg-green-500 shadow-md border-2 border-transparent active:border-white transition" data-val="Green"></button>
-                    <button class="remote-label-btn w-6 h-6 rounded-full bg-blue-500 shadow-md border-2 border-transparent active:border-white transition" data-val="Blue"></button>
-                    <button class="remote-label-btn w-6 h-6 rounded-full bg-purple-500 shadow-md border-2 border-transparent active:border-white transition" data-val="Purple"></button>
+                
+                <!-- 2열: 이전 / 다음 네비게이션 버튼 -->
+                <div class="flex w-full space-x-2">
+                    <button id="btn-remote-prev" class="flex-1 bg-gray-800 active:bg-gray-700 border border-gray-700 text-white rounded-lg py-2.5 text-sm font-bold flex justify-center items-center transition-colors">
+                        <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg> 이전
+                    </button>
+                    <button id="btn-remote-next" class="flex-1 bg-blue-700 active:bg-blue-600 border border-blue-600 text-white rounded-lg py-2.5 text-sm font-bold flex justify-center items-center transition-colors">
+                        다음 <svg class="w-5 h-5 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                    </button>
                 </div>
-            </div>
-            
-            <div class="flex w-full space-x-2 p-3">
-                <button id="btn-remote-prev" class="flex-1 bg-gray-800 active:bg-gray-700 border border-gray-700 text-white rounded-xl py-3 text-sm font-bold flex justify-center items-center transition-colors">
-                    <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg> 이전
-                </button>
-                <button id="btn-remote-next" class="flex-1 bg-blue-700 active:bg-blue-600 border border-blue-600 text-white rounded-xl py-3 text-sm font-bold flex justify-center items-center transition-colors">
-                    다음 <svg class="w-5 h-5 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
-                </button>
             </div>
         </div>
 
@@ -568,6 +571,7 @@
         const IDLE_TIMEOUT = 30 * 1000; 
         
         // P2P WebRTC 변수
+        let isRemoteModeEnabled = false; // 연동 기능 토글 플래그
         let myPeer = null, remoteConn = null, myPeerId = null;
         let qrCodeObj = null;
         let isPeerConnecting = false;
@@ -1127,8 +1131,30 @@
             });
         }
 
-        // --- 순수 P2P WebRTC 로직 (사진 유출 0%, Firebase 저장 안 함) ---
+        // --- 순수 P2P WebRTC 로직 (토글 적용) ---
+        function turnOnRemoteMode() {
+            isRemoteModeEnabled = true;
+            initHostPeer();
+        }
+
+        function turnOffRemoteMode() {
+            isRemoteModeEnabled = false;
+            
+            if (myPeer) { myPeer.destroy(); myPeer = null; }
+            if (remoteConn) { remoteConn.close(); remoteConn = null; }
+            isPeerConnecting = false;
+            
+            const textSpan = ui.btnRemoteMode.querySelector('span');
+            ui.btnRemoteMode.classList.remove('bg-emerald-600', 'bg-blue-600', 'text-white', 'border-emerald-600', 'border-blue-600');
+            ui.btnRemoteMode.classList.add('bg-gray-800', 'text-gray-400', 'border-gray-600');
+            if (textSpan) textSpan.textContent = '모바일 연동';
+            
+            ui.qrModal.classList.replace('flex', 'hidden');
+            showToast('모바일 연동이 꺼졌습니다.');
+        }
+
         function initHostPeer() {
+            if (!isRemoteModeEnabled) return;
             if (myPeer && !myPeer.destroyed) {
                 ui.qrModal.classList.replace('hidden', 'flex');
                 return;
@@ -1137,6 +1163,11 @@
             
             isPeerConnecting = true;
             showToast('보안 서버 초기화 중...');
+
+            const textSpan = ui.btnRemoteMode.querySelector('span');
+            ui.btnRemoteMode.classList.remove('bg-gray-800', 'text-gray-400', 'border-gray-600');
+            ui.btnRemoteMode.classList.add('bg-blue-600', 'text-white', 'border-blue-600');
+            if (textSpan) textSpan.textContent = 'QR 보기';
             
             try {
                 myPeer = new Peer({
@@ -1177,7 +1208,10 @@
                 
                 myPeer.on('connection', conn => {
                     remoteConn = conn;
-                    ui.btnRemoteMode.classList.add('bg-emerald-600', 'text-white');
+                    ui.btnRemoteMode.classList.remove('bg-blue-600', 'border-blue-600');
+                    ui.btnRemoteMode.classList.add('bg-emerald-600', 'border-emerald-600', 'text-white');
+                    if (textSpan) textSpan.textContent = '연동 ON';
+                    
                     ui.qrModal.classList.replace('flex', 'hidden');
                     showToast('스마트폰이 안전하게 연결되었습니다!');
                     
@@ -1214,7 +1248,9 @@
                     conn.on('close', () => { 
                         clearInterval(pingInterval);
                         remoteConn = null; 
-                        ui.btnRemoteMode.classList.remove('bg-emerald-600', 'text-white');
+                        ui.btnRemoteMode.classList.remove('bg-emerald-600', 'text-white', 'border-emerald-600');
+                        ui.btnRemoteMode.classList.add('bg-blue-600', 'text-white', 'border-blue-600');
+                        if (textSpan) textSpan.textContent = 'QR 보기';
                         showToast('리모컨 연결이 끊어졌습니다.'); 
                     });
                 });
@@ -1226,12 +1262,11 @@
                     else if (err.type === 'peer-unavailable') errMsg = '연결할 기기를 찾을 수 없습니다.';
                     else if (err.type === 'browser-incompatible') errMsg = '호환되지 않는 브라우저입니다.';
                     showToast(`${errMsg} 다시 버튼을 눌러주세요.`, true);
-                    if (myPeer) { myPeer.destroy(); myPeer = null; }
-                    ui.qrModal.classList.replace('flex', 'hidden');
+                    turnOffRemoteMode();
                 });
 
                 myPeer.on('disconnected', () => {
-                    if (myPeer && !myPeer.destroyed) {
+                    if (isRemoteModeEnabled && myPeer && !myPeer.destroyed) {
                         showToast('P2P 서버와 연결이 끊어졌습니다. 재연결 중...');
                         myPeer.reconnect();
                     }
@@ -1240,12 +1275,13 @@
             } catch(e) {
                 isPeerConnecting = false;
                 showToast('P2P 초기화 실패', true);
+                turnOffRemoteMode();
             }
         }
         
         // Host -> Remote (가장 안전한 Base64 분할 청크 전송: 외부 서버 개입 0%)
         async function syncWithRemote() {
-            if (!remoteConn || !remoteConn.open || !ui.mainImage.src || ui.mainImage.src.startsWith('null') || filteredFiles.length === 0) return;
+            if (!isRemoteModeEnabled || !remoteConn || !remoteConn.open || !ui.mainImage.src || ui.mainImage.src.startsWith('null') || filteredFiles.length === 0) return;
             
             const transferId = Date.now().toString();
             currentTransferId = transferId;
@@ -1305,7 +1341,7 @@
 
                 // 문자열 청크 전송
                 for (let i = 0; i < totalChunks; i++) {
-                    if (currentTransferId !== transferId || !remoteConn.open) break;
+                    if (currentTransferId !== transferId || !remoteConn.open || !isRemoteModeEnabled) break;
                     
                     remoteConn.send({
                         type: 'state_chunk',
@@ -2789,8 +2825,17 @@
                 else ui.sidebar.classList.add('hidden');
             });
             
-            // WebRTC QR 팝업
-            ui.btnRemoteMode.addEventListener('click', initHostPeer);
+            // WebRTC QR 토글 제어
+            ui.btnRemoteMode.addEventListener('click', () => {
+                if (isRemoteModeEnabled) {
+                    if (myPeer && !remoteConn) {
+                        if (ui.qrModal.classList.contains('hidden')) {
+                            ui.qrModal.classList.replace('hidden', 'flex'); 
+                        } else turnOffRemoteMode();
+                    } else turnOffRemoteMode();
+                } else turnOnRemoteMode();
+            });
+            
             ui.btnCloseQr.addEventListener('click', () => ui.qrModal.classList.replace('flex', 'hidden'));
             
             ui.btnToggleNav.addEventListener('click', () => { toggleNavigator(); userClosedNav = !isNavVisible; });
