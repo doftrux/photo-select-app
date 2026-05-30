@@ -1332,7 +1332,7 @@
             }
         }
         
-        // 원본 이미지를 Canvas를 통해 압축/문자열 변환하여 분할 청크 전송 (모바일 호환성 및 속도 확보)
+        // 원본 이미지를 Canvas를 통해 압축/문자열 변환하여 분할 전송 (모바일 호환성 및 속도 100% 확보)
         async function syncWithRemote() {
             if (!remoteConn || !remoteConn.open || !ui.mainImage.src || ui.mainImage.src.startsWith('null') || filteredFiles.length === 0) return;
             
@@ -1340,15 +1340,21 @@
             currentTransferId = transferId;
             
             try {
+                const fileObj = filteredFiles[currentIndex];
+                
+                // 전송 시작 알림 (로딩 상태 표시)
+                remoteConn.send({ type: 'state_loading', fileName: fileObj.name });
+
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
-                const MAX_SIZE = 1920; 
+                // 모바일 디스플레이에 최적화된 고화질 해상도 (1400px 제한)
+                const MAX_SIZE = 1400; 
                 
                 let w = ui.mainImage.naturalWidth;
                 let h = ui.mainImage.naturalHeight;
                 
                 if (w === 0 || h === 0) {
-                    setTimeout(syncWithRemote, 500); // 로드 안되었으면 재시도
+                    setTimeout(syncWithRemote, 300); // 이미지 로드가 덜 된 경우 재시도
                     return;
                 }
                 
@@ -1361,7 +1367,7 @@
                 canvas.width = w;
                 canvas.height = h;
                 
-                // EXIF 회전 상태 반영하여 그리기
+                // EXIF 회전 상태 반영하여 그리기 (모바일에서는 정방향으로 렌더링되도록)
                 ctx.translate(w/2, h/2);
                 ctx.rotate((transformState.rotate * Math.PI) / 180);
                 ctx.scale(transformState.flipX, transformState.flipY);
@@ -1373,42 +1379,28 @@
                     ctx.drawImage(ui.mainImage, -w/2, -h/2, w, h);
                 }
                 
-                // Data URL (Base64) 추출 (모바일 호환성 100% 보장 및 끊김 방지)
-                const dataUrl = canvas.toDataURL('image/jpeg', 0.85); 
-                const fileObj = filteredFiles[currentIndex];
-                
-                if (currentTransferId !== transferId) return; // 전송 도중 새로운 스와이프 발생 시 취소
-
-                const CHUNK_SIZE = 16384; // 16KB 길이 문자열
-                const totalChunks = Math.ceil(dataUrl.length / CHUNK_SIZE);
-
-                // 헤더 전송 (이미 캔버스에 회전이 적용되었으므로 transform 초기화 전달)
-                remoteConn.send({ 
-                    type: 'state_start', 
-                    fileId: transferId, 
-                    fileName: fileObj.name, 
-                    currentIndex, 
-                    total: filteredFiles.length,
-                    totalChunks: totalChunks,
-                    transform: { rotate: 0, flipX: 1, flipY: 1 } 
-                });
-
-                // 문자열 청크 전송
-                for (let i = 0; i < totalChunks; i++) {
-                    if (currentTransferId !== transferId || !remoteConn.open) break;
+                // 고화질 JPEG로 변환 후, 브라우저가 기본 지원하는 안정적인 ArrayBuffer로 다이렉트 전송
+                canvas.toBlob(async (blob) => {
+                    if (currentTransferId !== transferId || !remoteConn.open) return; // 전송 도중 넘어갔으면 취소
                     
-                    const chunkStr = dataUrl.substring(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-                    remoteConn.send({
-                        type: 'state_chunk',
-                        fileId: transferId,
-                        chunkIndex: i,
-                        chunkData: chunkStr
-                    });
-                    
-                    if (i % 20 === 0) await new Promise(r => setTimeout(r, 5)); // 버퍼 오버플로우 방지
-                }
+                    if (blob) {
+                        try {
+                            const arrayBuffer = await blob.arrayBuffer();
+                            remoteConn.send({ 
+                                type: 'state_start', // 모바일 수신부와 일치시킴
+                                data: arrayBuffer, 
+                                fileName: fileObj.name, 
+                                currentIndex, 
+                                total: filteredFiles.length,
+                                transform: { rotate: 0, flipX: 1, flipY: 1 } 
+                            });
+                        } catch(sendErr) {
+                            console.error('리모컨 이미지 데이터 전송 실패', sendErr);
+                        }
+                    }
+                }, 'image/jpeg', 0.85); // 고화질 85%
             } catch (e) {
-                console.error('리모컨 썸네일 생성 및 전송 에러', e);
+                console.error('리모컨 썸네일 생성 에러', e);
             }
         }
         
@@ -1442,7 +1434,6 @@
             let tapCount = 0;
             let tapTimer = null;
             let isMobileFullscreen = false;
-            let incomingImage = {}; // 분할 수신용 객체
             
             // 레이아웃 스케일 초기화
             function updateRemoteScale() {
@@ -1624,48 +1615,37 @@
                     }, 10000);
                 });
                 
-                // PC로부터 오는 데이터(문자열 청크) 처리
+                // PC로부터 오는 데이터 처리
                 conn.on('data', data => {
                     if (data.type === 'ping') return; // PC에서 온 ping 신호 무시
-                    if (data.type === 'state_start') {
-                        incomingImage[data.fileId] = {
-                            chunks: new Array(data.totalChunks),
-                            receivedCount: 0,
-                            totalChunks: data.totalChunks,
-                            fileName: data.fileName,
-                            currentIndex: data.currentIndex,
-                            total: data.total,
-                            transform: data.transform
-                        };
-                        document.getElementById('remote-filename').textContent = `수신 중... 0%`;
-                    } else if (data.type === 'state_chunk') {
-                        const imgData = incomingImage[data.fileId];
-                        if (!imgData) return; // 취소되거나 옛날 데이터
-                        
-                        imgData.chunks[data.chunkIndex] = data.chunkData;
-                        imgData.receivedCount++;
-                        
-                        const percent = Math.round((imgData.receivedCount / imgData.totalChunks) * 100);
-                        document.getElementById('remote-filename').textContent = `수신 중... ${percent}%`;
-                        
-                        if (imgData.receivedCount === imgData.totalChunks) {
-                            // 문자열 조립 후 이미지 렌더링
-                            const fullDataUrl = imgData.chunks.join('');
-                            imgEl.src = fullDataUrl;
-                            
-                            document.getElementById('remote-filename').textContent = `${imgData.currentIndex + 1}/${imgData.total} - ${imgData.fileName}`;
-                            
-                            // PC의 이미지 회전 상태값 부여
-                            const ts = imgData.transform || { rotate: 0, flipX: 1, flipY: 1 };
-                            imgEl.dataset.rotate = ts.rotate;
-                            imgEl.dataset.flipX = ts.flipX;
-                            imgEl.dataset.flipY = ts.flipY;
-
-                            remoteScale = 1; remotePanX = 0; remotePanY = 0;
-                            updateRemoteScale();
-                            
-                            delete incomingImage[data.fileId]; // 메모리 해제
+                    
+                    if (data.type === 'state_loading') {
+                        document.getElementById('remote-filename').textContent = `수신 중...`;
+                    } else if (data.type === 'state_start') {
+                        // 바이너리(ArrayBuffer) 데이터를 Blob 이미지로 즉시 변환
+                        let blob;
+                        if (data.data instanceof ArrayBuffer || data.data instanceof Uint8Array) {
+                            blob = new Blob([data.data], { type: 'image/jpeg' });
+                        } else if (data.data instanceof Blob) {
+                            blob = data.data;
                         }
+                        
+                        if (blob) {
+                            if (imgEl.src && imgEl.src.startsWith('blob:')) URL.revokeObjectURL(imgEl.src);
+                            imgEl.src = URL.createObjectURL(blob);
+                        }
+                        
+                        document.getElementById('remote-filename').textContent = `${data.currentIndex + 1}/${data.total} - ${data.fileName}`;
+                        
+                        // PC의 이미지 회전 상태값 부여
+                        const ts = data.transform || { rotate: 0, flipX: 1, flipY: 1 };
+                        imgEl.dataset.rotate = ts.rotate;
+                        imgEl.dataset.flipX = ts.flipX;
+                        imgEl.dataset.flipY = ts.flipY;
+
+                        remoteScale = 1; remotePanX = 0; remotePanY = 0;
+                        updateRemoteScale();
+                        
                     } else if(data.type === 'fileList') {
                         const ul = document.getElementById('remote-file-list');
                         ul.innerHTML = '';
