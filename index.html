@@ -221,7 +221,7 @@
                     <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"></path></svg>
                 </button>
                 <button id="btn-fullscreen" class="text-gray-400 hover:text-white focus:outline-none p-1 sm:px-2 sm:py-1 rounded hover:bg-gray-700 transition" title="전체화면 토글 (*)">
-                    <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path></svg>
+                    <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path></svg>
                 </button>
             </div>
 
@@ -638,6 +638,7 @@
         
         // Firebase 기반 P2P 대용 변수
         let myPeerId = null;
+        let qrCodeObj = null;
 
         const defaultShortcuts = {
             prev: 'arrowleft', next: 'arrowright',
@@ -1240,6 +1241,11 @@
             const remoteUrl = `${currentUrl}?remote=${myPeerId}`;
             
             ui.qrContainer.innerHTML = '';
+            
+            if (qrCodeObj) {
+                qrCodeObj.clear();
+            }
+            
             qrCodeObj = new QRCode(ui.qrContainer, {
                 text: remoteUrl, width: 200, height: 200, colorDark: "#000000", colorLight: "#ffffff", correctLevel: QRCode.CorrectLevel.H
             });
