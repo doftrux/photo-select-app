@@ -1313,9 +1313,9 @@
         }
         
         function syncWithRemote() {
-            if (!remoteConn || !ui.mainImage.src || ui.mainImage.src.startsWith('null') || filteredFiles.length === 0) return;
+            if (!remoteConn || !remoteConn.open || !ui.mainImage.src || ui.mainImage.src.startsWith('null') || filteredFiles.length === 0) return;
             
-            // 모바일 전송용 고해상도 썸네일 생성 (Canvas 이용)
+            // 모바일 전송용 고해상도 썸네일 생성 (Canvas -> ArrayBuffer 전송)
             try {
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
@@ -1348,12 +1348,24 @@
                     ctx.drawImage(ui.mainImage, -w/2, -h/2, w, h);
                 }
                 
-                // 전송 속도와 화질 타협 (JPEG Quality 85%)
-                const dataUrl = canvas.toDataURL('image/jpeg', 0.85); 
-                const fileObj = filteredFiles[currentIndex];
-                remoteConn.send({ type: 'state', data: dataUrl, fileName: fileObj.name, currentIndex, total: filteredFiles.length });
+                // Base64 문자열 대신 순수 바이너리 Blob 전송으로 네트워크 끊김/지연 방지
+                canvas.toBlob(async blob => {
+                    if (remoteConn && remoteConn.open && blob) {
+                        try {
+                            const fileObj = filteredFiles[currentIndex];
+                            const arrayBuffer = await blob.arrayBuffer();
+                            remoteConn.send({ 
+                                type: 'state', 
+                                data: arrayBuffer, 
+                                fileName: fileObj.name, 
+                                currentIndex, 
+                                total: filteredFiles.length 
+                            });
+                        } catch(sendErr) { console.error('리모컨 썸네일 데이터 전송 실패', sendErr); }
+                    }
+                }, 'image/jpeg', 0.85); // 화질 85%
             } catch (e) {
-                console.error('리모컨 썸네일 전송 에러', e);
+                console.error('리모컨 썸네일 생성 에러', e);
             }
         }
         
@@ -1550,9 +1562,24 @@
                     // PC로부터 오는 데이터 처리
                     conn.on('data', data => {
                         if(data.type === 'state') {
-                            imgEl.src = data.data;
+                            // ArrayBuffer(바이너리) 수신 시 처리 추가
+                            let blob;
+                            if (data.data instanceof ArrayBuffer || data.data instanceof Uint8Array) {
+                                blob = new Blob([data.data], { type: 'image/jpeg' });
+                            } else if (data.data instanceof Blob) {
+                                blob = data.data;
+                            }
+                            
+                            if (blob) {
+                                if (imgEl.src && imgEl.src.startsWith('blob:')) URL.revokeObjectURL(imgEl.src);
+                                imgEl.src = URL.createObjectURL(blob);
+                            } else if (typeof data.data === 'string') {
+                                imgEl.src = data.data; // 기존 Base64 호환성
+                            }
+                            
                             document.getElementById('remote-filename').textContent = `${data.currentIndex + 1}/${data.total} - ${data.fileName}`;
                             remoteScale = 1; remotePanX = 0; remotePanY = 0;
+                            updateRemoteScale();
                         } else if(data.type === 'fileList') {
                             const ul = document.getElementById('remote-file-list');
                             ul.innerHTML = '';
@@ -1648,15 +1675,22 @@
 
         async function loadZipFile(file) {
             if (typeof JSZip === 'undefined') { showToast('인터넷 연결 필요'); return; }
-            isZipMode = true; allFiles = []; viewedFilesSet.clear(); srcDirHandle = null;
-            loadedContextId = 'zip_' + file.name; ui.headerTitle.textContent = "📸 " + file.name; showToast('ZIP 압축 해제 중...');
+            
+            // 기존 작업이 꼬이지 않도록 변수 즉시 초기화
+            isZipMode = true; 
+            allFiles = []; viewedFilesSet.clear(); srcDirHandle = null;
+            loadedContextId = 'zip_' + file.name; 
+            ui.headerTitle.textContent = "📸 " + file.name; showToast('ZIP 압축 해제 중...');
             
             ui.loadingIndicator.classList.remove('hidden');
             ui.loadingIndicator.textContent = "ZIP 처리 중...";
 
             try {
-                const jszip = new JSZip(); // 인스턴스화 로직으로 변경 (기존 캐시 충돌 방지)
-                const zip = await jszip.loadAsync(file);
+                // 브라우저 파일 스트림 충돌을 방지하기 위해 완전한 ArrayBuffer로 선 변환 후 넘김
+                const arrayBuffer = await file.arrayBuffer();
+                const jszip = new JSZip(); 
+                const zip = await jszip.loadAsync(arrayBuffer);
+                
                 zip.forEach((path, entry) => {
                     if (!entry.dir && IMG_EXT_REGEX.test(path)) {
                         allFiles.push({ name: path, entry: entry, rating: 0, label: '', xmpLoaded: true, isZip: true });
@@ -1664,6 +1698,7 @@
                 });
                 ui.dropMsg.textContent = `ZIP 로드됨: ${file.name}`; ui.dropZone.style.display = 'flex';
                 
+                // 딜레이 해결을 위해 await 추가
                 await afterFilesLoaded();
             } catch (err) { 
                 showToast('ZIP 읽기 실패'); 
