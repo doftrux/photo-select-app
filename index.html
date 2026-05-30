@@ -127,7 +127,7 @@
         
         .file-list-item.active { background-color: #2563eb; color: white; }
 
-        /* 전체화면 툴바 숨김 및 호버 표시 애니메이션 수정 */
+        /* 전체화면 툴바 숨김 및 호버 표시 애니메이션 */
         .fullscreen-mode header { transform: translateY(-100%); transition: transform 0.3s, opacity 0.3s; position: absolute; top: 0; width: 100%; z-index: 50; pointer-events: none; opacity: 0; }
         .fullscreen-mode footer { transform: translateY(100%); transition: transform 0.3s, opacity 0.3s; position: absolute; bottom: 0; width: 100%; z-index: 50; pointer-events: none; opacity: 0; }
         .fullscreen-mode aside { transform: translateX(100%); transition: transform 0.3s, opacity 0.3s; position: absolute; right: 0; height: 100%; z-index: 40; pointer-events: none; opacity: 0; }
@@ -605,7 +605,6 @@
         let refTransformState = { rotate: 0, flipX: 1, flipY: 1 };
         let currentRefObjectUrl = null;
         let refAnimationFrameId = null;
-        let currentTransferId = null; // 리모컨 분할 전송 상태 확인용 변수
         
         // 클라우드 동기화 타겟 상태 변수
         let isExifAutoRotateEnabled = true;
@@ -1333,12 +1332,9 @@
             }
         }
         
-        // 원본 이미지를 Canvas를 통해 압축/문자열 변환하여 분할 전송 (모바일 호환성 및 속도 100% 확보)
+        // 원본 이미지를 Canvas를 통해 단일 Base64 문자열로 변환하여 한 번에 전송 (최상의 안정성)
         async function syncWithRemote() {
             if (!remoteConn || !remoteConn.open || !ui.mainImage.src || ui.mainImage.src.startsWith('null') || filteredFiles.length === 0) return;
-            
-            const transferId = Date.now().toString();
-            currentTransferId = transferId;
             
             try {
                 const fileObj = filteredFiles[currentIndex];
@@ -1348,8 +1344,9 @@
 
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
-                // 모바일 디스플레이에 최적화된 고화질 해상도 (1400px 제한)
-                const MAX_SIZE = 1400; 
+                
+                // 모바일 디스플레이에 최적화 + 통신 딜레이 방지를 위한 해상도 제한 (1000px)
+                const MAX_SIZE = 1000; 
                 
                 let w = ui.mainImage.naturalWidth;
                 let h = ui.mainImage.naturalHeight;
@@ -1380,39 +1377,18 @@
                     ctx.drawImage(ui.mainImage, -w/2, -h/2, w, h);
                 }
                 
-                // 고화질 JPEG 문자열 분할 전송
-                const dataUrl = canvas.toDataURL('image/jpeg', 0.85); 
+                // 용량을 최소화(0.6 품질)하여 한 번에 단일 전송 (가장 안정적임)
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.6); 
                 
-                if (currentTransferId !== transferId) return; // 전송 도중 새로운 스와이프 발생 시 취소
-
-                const CHUNK_SIZE = 16384; // 16KB 길이 문자열
-                const totalChunks = Math.ceil(dataUrl.length / CHUNK_SIZE);
-
-                // 헤더 전송 (이미 캔버스에 회전이 적용되었으므로 transform 초기화 전달)
                 remoteConn.send({ 
-                    type: 'state_start', // 모바일 수신부와 명칭 일치시킴
-                    fileId: transferId, 
+                    type: 'state', 
+                    data: dataUrl, 
                     fileName: fileObj.name, 
                     currentIndex, 
                     total: filteredFiles.length,
-                    totalChunks: totalChunks,
                     transform: { rotate: 0, flipX: 1, flipY: 1 } 
                 });
 
-                // 문자열 청크 전송
-                for (let i = 0; i < totalChunks; i++) {
-                    if (currentTransferId !== transferId || !remoteConn.open) break;
-                    
-                    const chunkStr = dataUrl.substring(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-                    remoteConn.send({
-                        type: 'state_chunk',
-                        fileId: transferId,
-                        chunkIndex: i,
-                        chunkData: chunkStr
-                    });
-                    
-                    if (i % 20 === 0) await new Promise(r => setTimeout(r, 5)); // 버퍼 오버플로우 방지
-                }
             } catch (e) {
                 console.error('리모컨 썸네일 생성 및 전송 에러', e);
             }
@@ -1448,7 +1424,6 @@
             let tapCount = 0;
             let tapTimer = null;
             let isMobileFullscreen = false;
-            let incomingImage = {}; // 분할 수신용 객체
             
             // 레이아웃 스케일 초기화
             function updateRemoteScale() {
@@ -1639,46 +1614,22 @@
                     if (data.type === 'state_loading') {
                         filenameEl.textContent = `수신 중...`;
                         filenameEl.classList.replace('text-green-400', 'text-white');
-                    } else if (data.type === 'state_start') {
-                        incomingImage[data.fileId] = {
-                            chunks: new Array(data.totalChunks),
-                            receivedCount: 0,
-                            totalChunks: data.totalChunks,
-                            fileName: data.fileName,
-                            currentIndex: data.currentIndex,
-                            total: data.total,
-                            transform: data.transform
-                        };
-                        filenameEl.textContent = `수신 중... 0%`;
-                        filenameEl.classList.replace('text-green-400', 'text-white');
-                    } else if (data.type === 'state_chunk') {
-                        const imgData = incomingImage[data.fileId];
-                        if (!imgData) return; // 취소되거나 옛날 데이터
+                    } else if (data.type === 'state') {
+                        // 단일 전송된 이미지 데이터를 직접 표시 (가장 안정적임)
+                        imgEl.src = data.data;
                         
-                        imgData.chunks[data.chunkIndex] = data.chunkData;
-                        imgData.receivedCount++;
+                        filenameEl.textContent = `${data.currentIndex + 1}/${data.total} - ${data.fileName}`;
                         
-                        const percent = Math.round((imgData.receivedCount / imgData.totalChunks) * 100);
-                        filenameEl.textContent = `수신 중... ${percent}%`;
-                        
-                        if (imgData.receivedCount === imgData.totalChunks) {
-                            // 문자열 조립 후 이미지 렌더링
-                            const fullDataUrl = imgData.chunks.join('');
-                            imgEl.src = fullDataUrl;
-                            
-                            filenameEl.textContent = `${imgData.currentIndex + 1}/${imgData.total} - ${imgData.fileName}`;
-                            
-                            // PC의 이미지 회전 상태값 부여
-                            const ts = imgData.transform || { rotate: 0, flipX: 1, flipY: 1 };
-                            imgEl.dataset.rotate = ts.rotate;
-                            imgEl.dataset.flipX = ts.flipX;
-                            imgEl.dataset.flipY = ts.flipY;
+                        // PC의 이미지 회전 상태값 부여
+                        const ts = data.transform || { rotate: 0, flipX: 1, flipY: 1 };
+                        imgEl.dataset.rotate = ts.rotate;
+                        imgEl.dataset.flipX = ts.flipX;
+                        imgEl.dataset.flipY = ts.flipY;
 
-                            remoteScale = 1; remotePanX = 0; remotePanY = 0;
-                            updateRemoteScale();
-                            
-                            delete incomingImage[data.fileId]; // 메모리 해제
-                        }
+                        remoteScale = 1; remotePanX = 0; remotePanY = 0;
+                        updateRemoteScale();
+                        
+                        filenameEl.classList.replace('text-green-400', 'text-white');
                     } else if(data.type === 'fileList') {
                         const ul = document.getElementById('remote-file-list');
                         ul.innerHTML = '';
@@ -2830,7 +2781,7 @@
             const targets = getXmpExportTargets();
             if(targets.length === 0) { showToast('선택된 항목 중 메타데이터가 있는 JPG/PNG가 없습니다.', true); return; }
             
-            showToast('ZIP 파일 생성 중...'); const zip = new JSZip();
+            showToast('ZIP 파일 생성 중...'); const JSZip = window.JSZip; const zip = new JSZip();
             targets.forEach(t => { zip.file(`${t.baseName}.xmp`, getXmpContentString(t.rating, t.label)); });
             
             try {
