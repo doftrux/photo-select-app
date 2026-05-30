@@ -491,7 +491,7 @@
     </div>
 
     <!-- 모바일 전용 리모컨 UI (PC에서는 숨김) -->
-    <div id="remote-view" class="hidden fixed inset-0 z-[99999] bg-black flex-col h-full w-full touch-none overflow-hidden select-none text-white">
+    <div id="remote-view" class="hidden fixed inset-0 z-[99999] bg-black flex-col h-full w-full overflow-hidden select-none text-white">
         <!-- Top Nav -->
         <div id="remote-top-bar" class="flex items-center justify-between p-3 bg-gray-900/90 absolute top-0 left-0 w-full z-50 transition-transform duration-300">
             <button id="btn-remote-list" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-bold shrink-0">☰ 목록</button>
@@ -504,7 +504,7 @@
         </div>
 
         <!-- Image Area -->
-        <div id="remote-img-container" class="flex-1 w-full h-full relative overflow-hidden flex items-center justify-center">
+        <div id="remote-img-container" class="flex-1 w-full h-full relative overflow-hidden flex items-center justify-center touch-none">
             <img id="remote-img" class="absolute left-1/2 top-1/2 pointer-events-none" style="transform: translate(-50%, -50%) scale(1); max-width: none; max-height: none;" src="" alt="" />
             <div id="remote-swipe-overlay" class="absolute inset-0 z-10 flex items-center justify-center opacity-0 transition-opacity pointer-events-none">
                 <span class="bg-black/50 text-white px-4 py-2 rounded-full font-bold text-xl backdrop-blur-sm"></span>
@@ -1448,6 +1448,42 @@
                 });
                 
                 let conn;
+                
+                const sendAction = (action, params = {}) => {
+                    if (conn && conn.open) conn.send({ action, ...params });
+                };
+
+                // 이벤트 리스너를 conn.on('open') 밖으로 빼서 무조건 등록되도록 보장
+                document.getElementById('btn-remote-prev').addEventListener('click', () => { sendAction('prev'); showSwipeEffect('이전'); });
+                document.getElementById('btn-remote-next').addEventListener('click', () => { sendAction('next'); showSwipeEffect('다음'); });
+                document.getElementById('btn-remote-list').addEventListener('click', () => {
+                    sendAction('requestList');
+                    document.getElementById('remote-list-overlay').classList.remove('hidden');
+                    document.getElementById('remote-list-overlay').classList.add('flex');
+                });
+                document.getElementById('btn-remote-list-close').addEventListener('click', () => {
+                    document.getElementById('remote-list-overlay').classList.add('hidden');
+                    document.getElementById('remote-list-overlay').classList.remove('flex');
+                });
+                document.getElementById('btn-remote-fit').addEventListener('click', () => {
+                    remoteViewMode = 'fit'; remoteScale = 1; remotePanX = 0; remotePanY = 0; updateRemoteScale();
+                    document.getElementById('btn-remote-fit').classList.replace('bg-gray-700', 'bg-blue-600');
+                    document.getElementById('btn-remote-width').classList.replace('bg-blue-600', 'bg-gray-700');
+                });
+                document.getElementById('btn-remote-width').addEventListener('click', () => {
+                    remoteViewMode = 'width'; remoteScale = 1; remotePanX = 0; remotePanY = 0; updateRemoteScale();
+                    document.getElementById('btn-remote-width').classList.replace('bg-gray-700', 'bg-blue-600');
+                    document.getElementById('btn-remote-fit').classList.replace('bg-blue-600', 'bg-gray-700');
+                });
+                document.getElementById('btn-remote-help').addEventListener('click', () => {
+                    document.getElementById('remote-help-overlay').classList.remove('hidden');
+                    document.getElementById('remote-help-overlay').classList.add('flex');
+                });
+                document.getElementById('btn-remote-help-close').addEventListener('click', () => {
+                    document.getElementById('remote-help-overlay').classList.add('hidden');
+                    document.getElementById('remote-help-overlay').classList.remove('flex');
+                });
+
                 peer.on('open', () => {
                     conn = peer.connect(hostId);
                     
@@ -1456,9 +1492,6 @@
                         statusEl.classList.replace('bg-yellow-400', 'bg-green-500');
                         statusEl.classList.replace('text-yellow-800', 'text-white');
                         statusEl.classList.remove('animate-pulse');
-                        
-                        document.getElementById('btn-remote-prev').onclick = () => { conn.send({action: 'prev'}); showSwipeEffect('이전'); };
-                        document.getElementById('btn-remote-next').onclick = () => { conn.send({action: 'next'}); showSwipeEffect('다음'); };
                         
                         // 제스처 기반 터치 이벤트 처리
                         container.addEventListener('touchstart', e => {
@@ -1528,37 +1561,6 @@
                                 touches = e.touches.length === 1 ? [{x: e.touches[0].clientX, y: e.touches[0].clientY}] : [];
                             }
                         });
-                        
-                        // 상단 툴바 UI 버튼 이벤트 (파일 목록 요청 등)
-                        document.getElementById('btn-remote-list').onclick = () => {
-                            conn.send({action: 'requestList'});
-                            document.getElementById('remote-list-overlay').classList.remove('hidden');
-                            document.getElementById('remote-list-overlay').classList.add('flex');
-                        };
-                        document.getElementById('btn-remote-list-close').onclick = () => {
-                            document.getElementById('remote-list-overlay').classList.add('hidden');
-                            document.getElementById('remote-list-overlay').classList.remove('flex');
-                        };
-                        document.getElementById('btn-remote-fit').onclick = () => {
-                            remoteViewMode = 'fit'; remoteScale = 1; remotePanX = 0; remotePanY = 0; updateRemoteScale();
-                            document.getElementById('btn-remote-fit').classList.replace('bg-gray-700', 'bg-blue-600');
-                            document.getElementById('btn-remote-width').classList.replace('bg-blue-600', 'bg-gray-700');
-                        };
-                        document.getElementById('btn-remote-width').onclick = () => {
-                            remoteViewMode = 'width'; remoteScale = 1; remotePanX = 0; remotePanY = 0; updateRemoteScale();
-                            document.getElementById('btn-remote-width').classList.replace('bg-gray-700', 'bg-blue-600');
-                            document.getElementById('btn-remote-fit').classList.replace('bg-blue-600', 'bg-gray-700');
-                        };
-                        
-                        // 매뉴얼 모달 이벤트 추가
-                        document.getElementById('btn-remote-help').onclick = () => {
-                            document.getElementById('remote-help-overlay').classList.remove('hidden');
-                            document.getElementById('remote-help-overlay').classList.add('flex');
-                        };
-                        document.getElementById('btn-remote-help-close').onclick = () => {
-                            document.getElementById('remote-help-overlay').classList.add('hidden');
-                            document.getElementById('remote-help-overlay').classList.remove('flex');
-                        };
                     });
                     
                     // PC로부터 오는 데이터 처리
@@ -1577,7 +1579,7 @@
                                 li.className = `p-3 rounded text-sm truncate ${item.idx === data.currentIndex ? 'bg-blue-600 text-white font-bold' : (item.viewed ? 'text-gray-400' : 'text-gray-200')} border-b border-gray-800 active:bg-gray-700`;
                                 li.textContent = `${item.idx + 1}. ${item.name}`;
                                 li.onclick = () => {
-                                    conn.send({action: 'jump', index: item.idx});
+                                    sendAction('jump', { index: item.idx });
                                     document.getElementById('remote-list-overlay').classList.add('hidden');
                                     document.getElementById('remote-list-overlay').classList.remove('flex');
                                 };
@@ -1675,9 +1677,10 @@
             ui.loadingIndicator.textContent = "ZIP 처리 중...";
 
             try {
-                // 이전 파일 스트림과 충돌하지 않도록 새 인스턴스로 전달
+                // 이전 파일 스트림과 충돌하지 않도록 ArrayBuffer로 완전 변환 후 로드
+                const arrayBuffer = await file.arrayBuffer();
                 const jszip = new JSZip(); 
-                const zip = await jszip.loadAsync(file);
+                const zip = await jszip.loadAsync(arrayBuffer);
                 
                 zip.forEach((path, entry) => {
                     if (!entry.dir && IMG_EXT_REGEX.test(path)) {
@@ -1689,7 +1692,7 @@
                 await afterFilesLoaded();
             } catch (err) { 
                 showToast('ZIP 읽기 실패'); 
-                console.error(err);
+                console.error('ZIP 처리 에러:', err);
             } finally {
                 ui.loadingIndicator.classList.add('hidden');
             }
