@@ -585,6 +585,7 @@
         let lastSelectedIndex = 0;
         let viewedFilesSet = new Set(); 
         let loadedContextId = ''; 
+        let currentSessionId = 0; // 작업 충돌 방지용 글로벌 세션 ID
         
         let zoomMulti = 1; 
         let viewMode = 'fit', lastCustomZoomMulti = 2.5;
@@ -1153,6 +1154,7 @@
                         
                         if (handles.length === 1 && handles[0].kind === 'directory') {
                             if (await verifyPermission(handles[0], true)) {
+                                currentSessionId++; // 새로운 세션 시작
                                 srcDirHandle = handles[0];
                                 openSourceDirectory(handles[0]);
                             } else {
@@ -1276,7 +1278,8 @@
                         showToast('리모컨 연결이 끊어졌습니다.'); 
                     });
                     
-                    syncWithRemote(); 
+                    // 연결 직후 첫 이미지 전송 대기 (버그 방지)
+                    setTimeout(() => syncWithRemote(), 500);
                 });
                 
                 // 에러 발생 시 앱이 크래시되지 않도록 객체 파괴 및 재시도 허용 로직
@@ -1315,11 +1318,11 @@
         function syncWithRemote() {
             if (!remoteConn || !remoteConn.open || !ui.mainImage.src || ui.mainImage.src.startsWith('null') || filteredFiles.length === 0) return;
             
-            // 모바일 전송용 고해상도 썸네일 생성 (Canvas -> ArrayBuffer 전송)
+            // 모바일 전송용 썸네일 생성 (데이터 절약을 위해 최대 1000px로 제한 및 압축률 최적화)
             try {
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
-                const MAX_SIZE = 1600; // 고화질 전송을 위해 해상도 증가
+                const MAX_SIZE = 1000; 
                 
                 let w = ui.mainImage.naturalWidth;
                 let h = ui.mainImage.naturalHeight;
@@ -1348,22 +1351,21 @@
                     ctx.drawImage(ui.mainImage, -w/2, -h/2, w, h);
                 }
                 
-                // Base64 문자열 대신 순수 바이너리 Blob 전송으로 네트워크 끊김/지연 방지
-                canvas.toBlob(async blob => {
-                    if (remoteConn && remoteConn.open && blob) {
-                        try {
-                            const fileObj = filteredFiles[currentIndex];
-                            const arrayBuffer = await blob.arrayBuffer();
-                            remoteConn.send({ 
-                                type: 'state', 
-                                data: arrayBuffer, 
-                                fileName: fileObj.name, 
-                                currentIndex, 
-                                total: filteredFiles.length 
-                            });
-                        } catch(sendErr) { console.error('리모컨 썸네일 데이터 전송 실패', sendErr); }
-                    }
-                }, 'image/jpeg', 0.85); // 화질 85%
+                // 전송 속도 최적화: 압축률 60% 데이터 전송 (끊김 방지)
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.6); 
+                const fileObj = filteredFiles[currentIndex];
+                
+                try {
+                    remoteConn.send({ 
+                        type: 'state', 
+                        data: dataUrl, 
+                        fileName: fileObj.name, 
+                        currentIndex, 
+                        total: filteredFiles.length 
+                    });
+                } catch(sendErr) {
+                    console.error('리모컨 데이터 채널 전송 실패', sendErr);
+                }
             } catch (e) {
                 console.error('리모컨 썸네일 생성 에러', e);
             }
@@ -1562,21 +1564,7 @@
                     // PC로부터 오는 데이터 처리
                     conn.on('data', data => {
                         if(data.type === 'state') {
-                            // ArrayBuffer(바이너리) 수신 시 처리 추가
-                            let blob;
-                            if (data.data instanceof ArrayBuffer || data.data instanceof Uint8Array) {
-                                blob = new Blob([data.data], { type: 'image/jpeg' });
-                            } else if (data.data instanceof Blob) {
-                                blob = data.data;
-                            }
-                            
-                            if (blob) {
-                                if (imgEl.src && imgEl.src.startsWith('blob:')) URL.revokeObjectURL(imgEl.src);
-                                imgEl.src = URL.createObjectURL(blob);
-                            } else if (typeof data.data === 'string') {
-                                imgEl.src = data.data; // 기존 Base64 호환성
-                            }
-                            
+                            imgEl.src = data.data; // 통신 안정성을 위해 DataURL 복귀
                             document.getElementById('remote-filename').textContent = `${data.currentIndex + 1}/${data.total} - ${data.fileName}`;
                             remoteScale = 1; remotePanX = 0; remotePanY = 0;
                             updateRemoteScale();
@@ -1637,6 +1625,7 @@
         }
 
         async function openFilesOrZip(preSelectedHandles = null) {
+            currentSessionId++; // 새로운 로드 세션 아이디 발급
             try {
                 const fileHandles = preSelectedHandles || await window.showOpenFilePicker({
                     multiple: true,
@@ -1674,9 +1663,9 @@
         }
 
         async function loadZipFile(file) {
+            currentSessionId++; // 이전 백그라운드 작업 모두 종료
             if (typeof JSZip === 'undefined') { showToast('인터넷 연결 필요'); return; }
             
-            // 기존 작업이 꼬이지 않도록 변수 즉시 초기화
             isZipMode = true; 
             allFiles = []; viewedFilesSet.clear(); srcDirHandle = null;
             loadedContextId = 'zip_' + file.name; 
@@ -1686,10 +1675,9 @@
             ui.loadingIndicator.textContent = "ZIP 처리 중...";
 
             try {
-                // 브라우저 파일 스트림 충돌을 방지하기 위해 완전한 ArrayBuffer로 선 변환 후 넘김
-                const arrayBuffer = await file.arrayBuffer();
+                // 이전 파일 스트림과 충돌하지 않도록 새 인스턴스로 전달
                 const jszip = new JSZip(); 
-                const zip = await jszip.loadAsync(arrayBuffer);
+                const zip = await jszip.loadAsync(file);
                 
                 zip.forEach((path, entry) => {
                     if (!entry.dir && IMG_EXT_REGEX.test(path)) {
@@ -1698,7 +1686,6 @@
                 });
                 ui.dropMsg.textContent = `ZIP 로드됨: ${file.name}`; ui.dropZone.style.display = 'flex';
                 
-                // 딜레이 해결을 위해 await 추가
                 await afterFilesLoaded();
             } catch (err) { 
                 showToast('ZIP 읽기 실패'); 
@@ -1709,6 +1696,7 @@
         }
 
         async function openSourceDirectory(handle = null) {
+            currentSessionId++; // 새로운 로드 세션 아이디 발급
             try {
                 if (!handle) { srcDirHandle = await window.showDirectoryPicker({ mode: 'readwrite' }); }
                 else {
@@ -1778,7 +1766,6 @@
                 
                 currentIndex = 0; selectedIndices.clear(); selectedIndices.add(currentIndex); lastSelectedIndex = currentIndex;
                 
-                // 첫 이미지 로드를 명시적으로 기다려 ZIP 딜레이 해결
                 await displayCurrentImage(); 
                 
                 renderFileList(); updateDashboard();
@@ -1948,8 +1935,11 @@
         async function loadAllMetadataInBackground() {
             if(isZipMode) return;
             ui.loadingIndicator.classList.remove('hidden');
+            const sessionId = currentSessionId;
             const chunkSize = 20;
+            
             for (let i = 0; i < allFiles.length; i += chunkSize) {
+                if (sessionId !== currentSessionId) break; // 새 세션이 시작되면 백그라운드 작업 즉시 중단
                 const chunk = allFiles.slice(i, i + chunkSize);
                 await Promise.all(chunk.map(async (file) => {
                     if(file.xmpLoaded) return;
@@ -1973,10 +1963,14 @@
                     } catch (e) {}
                     file.xmpLoaded = true;
                 }));
-                if (ui.filterRating.value !== 'all' || ui.filterLabel.value !== 'all') applyFilters(false);
-                else renderFileList();
+                if (sessionId === currentSessionId) {
+                    if (ui.filterRating.value !== 'all' || ui.filterLabel.value !== 'all') applyFilters(false);
+                    else renderFileList();
+                }
             }
-            ui.loadingIndicator.classList.add('hidden'); applyFilters();
+            if (sessionId === currentSessionId) {
+                ui.loadingIndicator.classList.add('hidden'); applyFilters();
+            }
         }
 
         function applyFilters(forceRefresh = true) {
