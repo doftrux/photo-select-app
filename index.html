@@ -9,8 +9,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <!-- EXIF 정보 및 RAW 파싱 라이브러리 -->
     <script src="https://cdn.jsdelivr.net/npm/exifr/dist/full.umd.js"></script>
-    <!-- WebRTC P2P 통신 라이브러리 (서버 없는 1:1 직접 연결) -->
-    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <!-- QR 코드 생성 라이브러리 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <style>
@@ -152,13 +150,13 @@
         
         <div class="flex flex-nowrap items-center gap-1 sm:gap-2 shrink-0 ml-auto justify-end">
             <!-- 모바일 연동 (보안 강화 WebRTC) -->
-            <button id="btn-remote-mode" class="p-1 sm:px-3 sm:py-1.5 text-[10px] sm:text-sm font-medium text-blue-400 border border-blue-600/50 bg-blue-900/20 rounded hover:bg-blue-900/40 transition-colors flex items-center shrink-0" title="스마트폰에 사진 띄우기 (서버에 저장되지 않음)">
+            <button id="btn-remote-mode" class="p-1 sm:px-3 sm:py-1.5 text-[10px] sm:text-sm font-medium text-blue-400 border border-blue-600/50 bg-blue-900/20 rounded hover:bg-blue-900/40 transition-colors flex items-center shrink-0" title="스마트폰 리모컨 켜기/끄기 (서버에 이미지 저장 안됨)">
                 <svg class="w-4 h-4 sm:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
-                <span class="hidden sm:inline">모바일 연동</span>
+                <span class="hidden sm:inline">보안 리모컨</span>
             </button>
             <div class="w-px h-5 bg-gray-700 hidden sm:block mx-1"></div>
 
-            <div class="flex items-center space-x-1 sm:space-x-2 bg-gray-800 p-1 sm:px-3 sm:py-1.5 rounded border border-gray-700 shrink-0">
+            <div class="flex items-center space-x-1 sm:space-x-2 bg-gray-800 p-1 sm:px-3 sm:py-1.5 rounded border border-gray-700 shrink-0" title="배경색 변경">
                 <span class="text-xs text-gray-400 mr-1 hidden lg:inline">배경</span>
                 <div class="hidden sm:flex items-center space-x-1">
                     <button class="w-4 h-4 rounded-full bg-black border border-gray-600 hover:scale-125 transition-transform" data-bg="#000000" title="검은색"></button>
@@ -377,7 +375,7 @@
 
         <div class="flex items-center justify-end gap-1 sm:gap-2 shrink-0 ml-auto">
             <button id="btn-open-dest" class="p-1 sm:px-3 sm:py-1.5 text-[10px] sm:text-sm font-medium text-gray-300 bg-gray-700 rounded hover:bg-gray-600 focus:outline-none flex items-center shrink-0" title="셀렉 폴더 설정" disabled>
-                <svg class="w-4 h-4 sm:mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z"></path></svg>
+                <svg class="w-4 h-4 sm:mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 01-2 2z"></path></svg>
                 <span class="hidden sm:inline">대상 폴더</span>
             </button>
             <button id="btn-move" class="p-1 sm:px-4 sm:py-1.5 text-[10px] sm:text-sm font-medium text-white bg-green-700 rounded hover:bg-green-600 disabled:opacity-50 flex items-center shrink-0" title="셀렉 (Enter)">
@@ -435,7 +433,7 @@
     <!-- 모바일 전용 리모컨 UI (PC에서는 숨김) -->
     <div id="remote-view" class="hidden fixed inset-0 z-[99999] bg-[#000] flex-col h-full w-full overflow-hidden select-none text-white">
         <!-- Top Nav -->
-        <div id="remote-top-bar" class="flex items-center justify-between p-3 bg-gray-900/90 absolute top-0 left-0 w-full z-50 transition-transform duration-300">
+        <div id="remote-top-bar" class="flex items-center justify-between p-3 bg-gray-900/90 absolute top-0 left-0 w-full z-50 transition-transform duration-300 shrink-0">
             <button id="btn-remote-list" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-bold shrink-0">☰ 목록</button>
             <div class="text-center font-bold text-xs sm:text-sm truncate px-2 flex-1 text-emerald-400" id="remote-filename">연결 중...</div>
             <div class="flex items-center space-x-1 shrink-0">
@@ -446,17 +444,19 @@
         </div>
 
         <!-- Image Area (제스처 동작 영역) -->
-        <div id="remote-img-container" class="flex-1 w-full h-full relative overflow-hidden flex items-center justify-center touch-none">
+        <div id="remote-img-container" class="flex-1 w-full relative overflow-hidden flex items-center justify-center touch-none">
             <img id="remote-img" class="absolute left-1/2 top-1/2 pointer-events-none" style="transform: translate(-50%, -50%) scale(1); max-width: none; max-height: none;" src="" alt="" />
             <div id="remote-swipe-overlay" class="absolute inset-0 z-10 flex items-center justify-center opacity-0 transition-opacity pointer-events-none">
                 <span class="bg-black/50 text-white px-6 py-3 rounded-2xl font-bold text-2xl backdrop-blur-sm border border-gray-600 shadow-2xl"></span>
             </div>
         </div>
 
-        <!-- Bottom Bar -->
-        <div id="remote-bottom-bar" class="flex flex-col w-full bg-gray-900/95 absolute bottom-0 left-0 z-50 transition-transform duration-300">
-            <!-- 메타데이터 컨트롤 -->
-            <div class="flex w-full p-2 space-x-2 border-b border-gray-800">
+        <!-- Unified Bottom Controls (Metadata + Navigation) -->
+        <div id="remote-bottom-bar" class="flex flex-col w-full bg-gray-900/95 shrink-0 border-t border-gray-800 pb-safe transition-transform duration-300">
+            
+            <!-- Metadata Controls (Stars & Labels in one row or stacked cleanly) -->
+            <div class="flex flex-col sm:flex-row w-full p-2 gap-2 border-b border-gray-800/50">
+                <!-- Stars -->
                 <div class="flex justify-between items-center bg-gray-800 rounded-lg p-1.5 border border-gray-700 flex-1">
                     <button class="remote-star-btn w-8 h-8 flex items-center justify-center rounded text-gray-500 active:bg-gray-700 transition" data-val="1"><svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path></svg></button>
                     <button class="remote-star-btn w-8 h-8 flex items-center justify-center rounded text-gray-500 active:bg-gray-700 transition" data-val="2"><svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path></svg></button>
@@ -465,6 +465,7 @@
                     <button class="remote-star-btn w-8 h-8 flex items-center justify-center rounded text-gray-500 active:bg-gray-700 transition" data-val="5"><svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path></svg></button>
                     <button class="remote-star-btn w-8 h-8 flex items-center justify-center rounded text-gray-500 active:bg-gray-700 transition" data-val="0"><span class="font-bold text-sm">X</span></button>
                 </div>
+                <!-- Labels -->
                 <div class="flex justify-between items-center bg-gray-800 rounded-lg p-1.5 border border-gray-700 flex-1">
                     <button class="remote-label-btn w-6 h-6 rounded-full bg-red-500 shadow-md border-2 border-transparent active:border-white transition" data-val="Red"></button>
                     <button class="remote-label-btn w-6 h-6 rounded-full bg-yellow-500 shadow-md border-2 border-transparent active:border-white transition" data-val="Yellow"></button>
@@ -474,7 +475,8 @@
                 </div>
             </div>
             
-            <div class="flex w-full space-x-2 p-3">
+            <!-- Navigation Buttons -->
+            <div class="flex w-full space-x-2 p-2">
                 <button id="btn-remote-prev" class="flex-1 bg-gray-800 active:bg-gray-700 border border-gray-700 text-white rounded-xl py-3 text-sm font-bold flex justify-center items-center transition-colors">
                     <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg> 이전
                 </button>
@@ -567,11 +569,12 @@
         let idleTimer = null, isScreensaverActive = false;
         const IDLE_TIMEOUT = 30 * 1000; 
         
-        // P2P WebRTC 변수
+        // P2P WebRTC 변수 & 리모컨 모드
         let myPeer = null, remoteConn = null, myPeerId = null;
         let qrCodeObj = null;
         let isPeerConnecting = false;
         let currentTransferId = null;
+        let isRemoteModeOn = false; // 리모컨 토글 상태 (기본 꺼짐)
 
         const defaultShortcuts = {
             prev: 'arrowleft', next: 'arrowright',
@@ -879,9 +882,11 @@
 
             ui.statProgressTxt.textContent = Math.round(progressRate) + '%';
             ui.statProgressBar.style.width = progressRate + '%';
+            
             ui.statSelectCount.textContent = selectedCount;
             ui.statSelectTxt.textContent = Math.round(selectRate) + '%';
             ui.statSelectBar.style.width = selectRate + '%';
+            
             ui.statEstimate.textContent = estimatedCount;
         }
 
@@ -1135,8 +1140,14 @@
             }
             if (isPeerConnecting) return;
             
+            isRemoteModeOn = true;
             isPeerConnecting = true;
             showToast('보안 서버 초기화 중...');
+            
+            // 토글 UI 변경 (켜짐 상태)
+            ui.btnRemoteMode.classList.remove('bg-blue-900/20', 'border-blue-600/50', 'text-blue-400');
+            ui.btnRemoteMode.classList.add('bg-red-900/20', 'border-red-600/50', 'text-red-400');
+            ui.btnRemoteMode.querySelector('span').textContent = '리모컨 끄기';
             
             try {
                 myPeer = new Peer({
@@ -1177,7 +1188,6 @@
                 
                 myPeer.on('connection', conn => {
                     remoteConn = conn;
-                    ui.btnRemoteMode.classList.add('bg-emerald-600', 'text-white');
                     ui.qrModal.classList.replace('flex', 'hidden');
                     showToast('스마트폰이 안전하게 연결되었습니다!');
                     
@@ -1214,13 +1224,13 @@
                     conn.on('close', () => { 
                         clearInterval(pingInterval);
                         remoteConn = null; 
-                        ui.btnRemoteMode.classList.remove('bg-emerald-600', 'text-white');
                         showToast('리모컨 연결이 끊어졌습니다.'); 
                     });
                 });
                 
                 myPeer.on('error', err => {
                     isPeerConnecting = false;
+                    isRemoteModeOn = false;
                     let errMsg = '알 수 없는 P2P 서버 오류';
                     if (err.type === 'network' || err.type === 'server-error') errMsg = 'P2P 서버가 혼잡하거나 네트워크 연결이 끊겼습니다.';
                     else if (err.type === 'peer-unavailable') errMsg = '연결할 기기를 찾을 수 없습니다.';
@@ -1228,10 +1238,14 @@
                     showToast(`${errMsg} 다시 버튼을 눌러주세요.`, true);
                     if (myPeer) { myPeer.destroy(); myPeer = null; }
                     ui.qrModal.classList.replace('flex', 'hidden');
+                    
+                    ui.btnRemoteMode.classList.add('bg-blue-900/20', 'border-blue-600/50', 'text-blue-400');
+                    ui.btnRemoteMode.classList.remove('bg-red-900/20', 'border-red-600/50', 'text-red-400');
+                    ui.btnRemoteMode.querySelector('span').textContent = '보안 리모컨';
                 });
 
                 myPeer.on('disconnected', () => {
-                    if (myPeer && !myPeer.destroyed) {
+                    if (myPeer && !myPeer.destroyed && isRemoteModeOn) {
                         showToast('P2P 서버와 연결이 끊어졌습니다. 재연결 중...');
                         myPeer.reconnect();
                     }
@@ -1239,13 +1253,34 @@
 
             } catch(e) {
                 isPeerConnecting = false;
+                isRemoteModeOn = false;
                 showToast('P2P 초기화 실패', true);
             }
         }
         
+        function stopHostRemote() {
+            isRemoteModeOn = false;
+            
+            if (remoteConn) {
+                remoteConn.close();
+                remoteConn = null;
+            }
+            if (myPeer) {
+                myPeer.destroy();
+                myPeer = null;
+            }
+            
+            ui.qrModal.classList.replace('flex', 'hidden');
+            ui.btnRemoteMode.classList.add('bg-blue-900/20', 'border-blue-600/50', 'text-blue-400');
+            ui.btnRemoteMode.classList.remove('bg-red-900/20', 'border-red-600/50', 'text-red-400');
+            ui.btnRemoteMode.querySelector('span').textContent = '보안 리모컨';
+            
+            showToast('보안 리모컨 연결이 종료되었습니다.');
+        }
+
         // Host -> Remote (가장 안전한 Base64 분할 청크 전송: 외부 서버 개입 0%)
         async function syncWithRemote() {
-            if (!remoteConn || !remoteConn.open || !ui.mainImage.src || ui.mainImage.src.startsWith('null') || filteredFiles.length === 0) return;
+            if (!isRemoteModeOn || !remoteConn || !remoteConn.open || !ui.mainImage.src || ui.mainImage.src.startsWith('null') || filteredFiles.length === 0) return;
             
             const transferId = Date.now().toString();
             currentTransferId = transferId;
@@ -1305,7 +1340,7 @@
 
                 // 문자열 청크 전송
                 for (let i = 0; i < totalChunks; i++) {
-                    if (currentTransferId !== transferId || !remoteConn.open) break;
+                    if (currentTransferId !== transferId || !remoteConn.open || !isRemoteModeOn) break;
                     
                     remoteConn.send({
                         type: 'state_chunk',
@@ -2123,8 +2158,8 @@
                         setSmoothTransform(false); requestAnimationFrame(() => { clampPan(); applyTransform(); });
                     } else { setSmoothTransform(false); resetTransform(); }
                     
-                    // 모바일로 새 이미지 상태 전송
-                    syncWithRemote();
+                    // 리모컨이 켜져 있다면 모바일 화면으로 저화질 썸네일 전송
+                    if(isRemoteModeOn) syncWithRemote();
                 };
                 
                 if (currentObjectUrl) {
@@ -2789,8 +2824,15 @@
                 else ui.sidebar.classList.add('hidden');
             });
             
-            // WebRTC QR 팝업
-            ui.btnRemoteMode.addEventListener('click', initHostPeer);
+            // 보안 리모컨 켜기/끄기 토글 이벤트
+            ui.btnRemoteMode.addEventListener('click', () => {
+                if (isRemoteModeOn) {
+                    stopHostRemote();
+                } else {
+                    initHostPeer();
+                }
+            });
+            
             ui.btnCloseQr.addEventListener('click', () => ui.qrModal.classList.replace('flex', 'hidden'));
             
             ui.btnToggleNav.addEventListener('click', () => { toggleNavigator(); userClosedNav = !isNavVisible; });
