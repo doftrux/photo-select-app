@@ -220,7 +220,7 @@
                 <button id="btn-toggle-nav" class="text-gray-400 hover:text-white focus:outline-none p-1 sm:px-2 sm:py-1 rounded hover:bg-gray-700 transition" title="네비게이션 켜기/끄기 (N)">
                     <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"></path></svg>
                 </button>
-                <button id="btn-fullscreen" class="text-gray-400 hover:text-white focus:outline-none p-1 sm:px-2 sm:py-1 rounded hover:bg-gray-700 transition" title="전체화면 토글">
+                <button id="btn-fullscreen" class="text-gray-400 hover:text-white focus:outline-none p-1 sm:px-2 sm:py-1 rounded hover:bg-gray-700 transition" title="전체화면 토글 (*)">
                     <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path></svg>
                 </button>
             </div>
@@ -629,7 +629,7 @@
             rate1: '1', rate2: '2', rate3: '3', rate4: '4', rate5: '5', rate0: '0',
             labelRed: '6', labelYellow: '7', labelGreen: '8', labelBlue: '9', labelPurple: 't',
             move: 'enter', modal: 'h',
-            fullScreenAndSaver: 'f11'
+            fullScreenAndSaver: '*' // 전체화면 켜기/끄기 기본값 변경
         };
         let userShortcuts = { ...defaultShortcuts };
         let isBindingKey = false, bindingAction = null;
@@ -876,7 +876,8 @@
         function resetIdleTimer() {
             if (isScreensaverActive) hideScreensaver();
             if (idleTimer) clearTimeout(idleTimer);
-            idleTimer = setTimeout(showScreensaver, IDLE_TIMEOUT);
+            // 15초(15000ms) 미조작 시 스크린세이버
+            idleTimer = setTimeout(showScreensaver, 15000);
         }
 
         function setSmoothTransform(enable) {
@@ -987,7 +988,7 @@
             if (!list) return;
             list.innerHTML = '';
             const categories = {
-                '이동 및 화면': { prev: '이전 사진', next: '다음 사진', zoomIn: '화면 확대 (+)', zoomOut: '화면 축소 (-)', loupe: '부분 확대 유지', nav: '네비게이션 켜기/끄기', rotRight: '오른쪽 회전', rotLeft: '왼쪽 회전', fullScreenAndSaver: '전체화면 / 스크린 세이버' },
+                '이동 및 화면': { prev: '이전 사진', next: '다음 사진', zoomIn: '화면 확대 (+)', zoomOut: '화면 축소 (-)', loupe: '부분 확대 유지', nav: '네비게이션 켜기/끄기', rotRight: '오른쪽 회전', rotLeft: '왼쪽 회전', fullScreenAndSaver: '전체화면 켜기/끄기' },
                 '별점 및 라벨': { rate1: '별점 1', rate2: '별점 2', rate3: '별점 3', rate4: '별점 4', rate5: '별점 5', rate0: '등급 초기화', labelRed: '빨강 라벨 (토글)', labelYellow: '노랑 라벨 (토글)', labelGreen: '초록 라벨 (토글)', labelBlue: '파랑 라벨 (토글)', labelPurple: '보라 라벨 (토글)' },
                 '작업': { move: '선택 파일 셀렉(토글)', modal: '단축키 창 열기/닫기' }
             };
@@ -1039,14 +1040,10 @@
             
             if (e.shiftKey && key === 'r') { e.preventDefault(); toggleCompareMode(); return; }
 
-            // 스크린 세이버 및 전체화면 사용자 지정 단축키 반영
+            // 전체화면 토글
             if (key === userShortcuts.fullScreenAndSaver) { 
                 e.preventDefault(); 
-                if (document.body.classList.contains('fullscreen-mode')) {
-                    showScreensaver();
-                } else {
-                    toggleFullscreen(); 
-                }
+                toggleFullscreen(); 
                 return; 
             }
             
@@ -1103,9 +1100,13 @@
 
         function toggleFullscreen() {
             if (!document.fullscreenElement) {
-                if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(()=>{});
+                if (document.documentElement.requestFullscreen) {
+                    document.documentElement.requestFullscreen().catch(()=>{});
+                }
             } else {
-                if (document.exitFullscreen) document.exitFullscreen().catch(()=>{});
+                if (document.exitFullscreen) {
+                    document.exitFullscreen().catch(()=>{});
+                }
             }
         }
 
@@ -1123,7 +1124,7 @@
                 }
             });
             
-            // ESC키로 브라우저 전체화면 탈출 시 CSS 상태 동기화 처리
+            // 전체화면 상태 동기화 처리
             document.addEventListener('fullscreenchange', () => {
                 if (!document.fullscreenElement) {
                     document.body.classList.remove('fullscreen-mode', 'show-header', 'show-footer', 'show-sidebar');
@@ -1331,62 +1332,89 @@
             }
         }
         
-        // 원본 이미지를 Canvas 렌더링(열화) 없이 파일 데이터 그대로 청크 전송 (속도 및 100% 화질 확보)
+        // 원본 이미지를 Canvas를 통해 압축/변환하여 분할 청크 전송 (모바일 호환성 및 속도 확보)
         async function syncWithRemote() {
-            if (!remoteConn || !remoteConn.open || filteredFiles.length === 0) return;
+            if (!remoteConn || !remoteConn.open || !ui.mainImage.src || ui.mainImage.src.startsWith('null') || filteredFiles.length === 0) return;
             
             const transferId = Date.now().toString();
             currentTransferId = transferId;
             
             try {
-                const fileObj = filteredFiles[currentIndex];
-                let fileData;
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                const MAX_SIZE = 1920; 
                 
-                // 원본 파일 데이터 추출
-                if (fileObj.isZip) {
-                    fileData = await fileObj.entry.async("blob");
+                let w = ui.mainImage.naturalWidth;
+                let h = ui.mainImage.naturalHeight;
+                
+                if (w === 0 || h === 0) return;
+                
+                if (w > MAX_SIZE || h > MAX_SIZE) {
+                    const ratio = Math.min(MAX_SIZE/w, MAX_SIZE/h);
+                    w *= ratio;
+                    h *= ratio;
+                }
+                
+                canvas.width = w;
+                canvas.height = h;
+                
+                // EXIF 회전 상태 반영하여 그리기
+                ctx.translate(w/2, h/2);
+                ctx.rotate((transformState.rotate * Math.PI) / 180);
+                ctx.scale(transformState.flipX, transformState.flipY);
+                
+                const isRotated = Math.abs(transformState.rotate) % 180 === 90;
+                if(isRotated) {
+                    ctx.drawImage(ui.mainImage, -h/2, -w/2, h, w);
                 } else {
-                    fileData = await fileObj.handle.getFile();
+                    ctx.drawImage(ui.mainImage, -w/2, -h/2, w, h);
                 }
+                
+                canvas.toBlob(async (blob) => {
+                    if (currentTransferId !== transferId) return; // 전송 도중 새로운 스와이프 발생 시 취소
+                    if (blob && remoteConn && remoteConn.open) {
+                        try {
+                            const arrayBuffer = await blob.arrayBuffer();
+                            const uint8Array = new Uint8Array(arrayBuffer);
+                            const CHUNK_SIZE = 32768; // 32KB 청크 단위 분할 전송 (안정성 확보)
+                            const totalChunks = Math.ceil(uint8Array.length / CHUNK_SIZE);
+                            const fileObj = filteredFiles[currentIndex];
 
-                if (currentTransferId !== transferId) return;
+                            // 헤더 전송 (이미 캔버스에 회전이 적용되었으므로 transform 초기화 전달)
+                            remoteConn.send({ 
+                                type: 'state_start', 
+                                fileId: transferId, 
+                                fileName: fileObj.name, 
+                                currentIndex, 
+                                total: filteredFiles.length,
+                                totalChunks: totalChunks,
+                                mimeType: 'image/jpeg',
+                                transform: { rotate: 0, flipX: 1, flipY: 1 } 
+                            });
 
-                const arrayBuffer = await fileData.arrayBuffer();
-                const uint8Array = new Uint8Array(arrayBuffer);
-                const CHUNK_SIZE = 65536; // 64KB 단위 (가장 빠르고 안정적인 사이즈)
-                const totalChunks = Math.ceil(uint8Array.length / CHUNK_SIZE);
-
-                // 1. 이미지 메타데이터 및 변환(Transform) 상태 먼저 전송
-                remoteConn.send({
-                    type: 'state_meta',
-                    fileId: transferId,
-                    fileName: fileObj.name,
-                    currentIndex,
-                    total: filteredFiles.length,
-                    transform: transformState, // PC에서의 회전, 반전 상태
-                    totalChunks: totalChunks,
-                    mimeType: fileData.type || 'image/jpeg'
-                });
-
-                // 2. 바이너리 청크 스트림 전송
-                for (let i = 0; i < totalChunks; i++) {
-                    if (currentTransferId !== transferId || !remoteConn.open) break;
-                    const start = i * CHUNK_SIZE;
-                    const end = Math.min(start + CHUNK_SIZE, uint8Array.length);
-                    const chunk = uint8Array.slice(start, end);
-                    
-                    remoteConn.send({
-                        type: 'state_chunk',
-                        fileId: transferId,
-                        chunkIndex: i,
-                        chunkData: chunk.buffer
-                    });
-                    
-                    // 버퍼 오버플로우 방지 (너무 빠르면 WebRTC 뻗음)
-                    if (i % 10 === 0) await new Promise(r => setTimeout(r, 2)); 
-                }
+                            // 청크 전송
+                            for (let i = 0; i < totalChunks; i++) {
+                                if (currentTransferId !== transferId || !remoteConn.open) break;
+                                const start = i * CHUNK_SIZE;
+                                const end = Math.min(start + CHUNK_SIZE, uint8Array.length);
+                                const chunk = uint8Array.slice(start, end);
+                                
+                                remoteConn.send({
+                                    type: 'state_chunk',
+                                    fileId: transferId,
+                                    chunkIndex: i,
+                                    chunkData: chunk.buffer
+                                });
+                                
+                                if (i % 15 === 0) await new Promise(r => setTimeout(r, 2)); // 버퍼 오버플로우 방지
+                            }
+                        } catch(sendErr) {
+                            console.error('리모컨 데이터 채널 전송 실패', sendErr);
+                        }
+                    }
+                }, 'image/jpeg', 0.85); // 고품질 85%
             } catch (e) {
-                console.error('리모컨 썸네일 생성 및 전송 에러', e);
+                console.error('리모컨 썸네일 생성 에러', e);
             }
         }
         
