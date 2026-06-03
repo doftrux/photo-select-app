@@ -1893,6 +1893,7 @@
 
                 loadedContextId = 'zip_' + file.name; 
                 ui.headerTitle.textContent = "📸 " + file.name; 
+                ui.btnOpenDest.disabled = false; // <--- Add this!
                 showToast('ZIP 데이터 로드 중...');
 
                 const arrayBuffer = await file.arrayBuffer();
