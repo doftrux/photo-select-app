@@ -418,16 +418,13 @@
             <div class="mt-4 pt-4 border-t border-gray-700 shrink-0">
                 <div class="flex justify-between items-center mb-1.5">
                     <span class="text-sm font-bold text-gray-300">스크린 세이버 작동 시간</span>
-                    <select id="sel-screensaver-timeout" class="bg-gray-900 text-white text-xs px-2 py-1.5 rounded border border-gray-600 outline-none cursor-pointer">
-                        <option value="15">15초</option>
-                        <option value="30">30초</option>
-                        <option value="60">1분</option>
-                        <option value="300">5분</option>
-                        <option value="0">사용 안 함</option>
-                    </select>
+                    <div class="flex items-center space-x-2">
+                        <input type="number" id="input-screensaver-timeout" class="bg-gray-900 text-white text-xs px-2 py-1.5 rounded border border-gray-600 outline-none cursor-text w-16 text-right" min="0" placeholder="30">
+                        <span class="text-xs text-gray-400">초 (0: 끔)</span>
+                    </div>
                 </div>
                 <div class="flex justify-between items-center">
-                    <span class="text-[10px] text-gray-500 leading-tight flex-1 mr-4">지정된 시간 동안 아무 조작이 없으면 화면이 잠깁니다.</span>
+                    <span class="text-[10px] text-gray-500 leading-tight flex-1 mr-4">지정된 시간(초) 동안 조작이 없으면 화면이 잠깁니다.</span>
                 </div>
             </div>
 
@@ -723,8 +720,8 @@
                     }
                     if (data.screensaverTimeoutSec !== undefined) {
                         screensaverTimeoutSec = data.screensaverTimeoutSec;
-                        const selTimeout = document.getElementById('sel-screensaver-timeout');
-                        if(selTimeout) selTimeout.value = screensaverTimeoutSec;
+                        const inputTimeout = document.getElementById('input-screensaver-timeout');
+                        if(inputTimeout) inputTimeout.value = screensaverTimeoutSec;
                     }
                 }
             } catch(e) { console.error("Cloud DB Load Error:", e); }
@@ -1721,6 +1718,9 @@
             const imgEl = document.getElementById('remote-img');
             let incomingImage = {}; // 조각 모음용
             
+            // 모바일 UI 버튼 및 터치 제스처 이벤트 리스너 등록
+            setupMobileUI();
+            
             // P2P 연결 시작
             try {
                 const peer = new Peer({
@@ -1907,14 +1907,14 @@
                 if (sessionId !== currentSessionId) return;
 
                 zip.forEach((path, entry) => {
-                    if (!entry.dir && IMG_EXT_REGEX.test(path)) {
+                    // 맥OS의 숨김 파일(__MACOSX)을 목록에서 제외합니다.
+                    if (!entry.dir && IMG_EXT_REGEX.test(path) && !path.includes('__MACOSX/')) {
                         allFiles.push({ name: path, entry: entry, rating: 0, label: '', xmpLoaded: true, isZip: true });
                     }
                 });
                 
                 ui.dropMsg.textContent = `ZIP 로드됨: ${file.name}`; ui.dropZone.style.display = 'flex';
                 
-                renderFileList();
                 await afterFilesLoaded();
             } catch (err) { 
                 showToast('ZIP 읽기 실패: ' + err.message); 
@@ -1984,7 +1984,6 @@
                     }
                 }
                 if (sessionId === currentSessionId) {
-                    renderFileList();
                     await afterFilesLoaded();
                 }
             } catch (error) { showToast('읽기 오류'); }
@@ -1995,6 +1994,8 @@
             filteredFiles = [...allFiles];
             
             await loadViewedProgress(); 
+            
+            renderFileList(); // 파일 정렬이 끝난 후 목록을 생성하도록 수정
             
             if (filteredFiles.length > 0) {
                 if (isLocalMobileMode) {
@@ -2275,7 +2276,7 @@
                     <div class="flex items-center flex-1 min-w-0">
                         ${f.isCopied ? '<span class="bg-green-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded mr-1.5 shrink-0 leading-none">SELECT</span>' : ''}
                         ${!viewedFilesSet.has(f.name) ? '<span class="unviewed-dot w-1.5 h-1.5 bg-blue-500 rounded-full mr-1.5 shrink-0 shadow-[0_0_4px_rgba(59,130,246,0.8)]" title="미열람"></span>' : ''}
-                        <span class="truncate flex-1">${f.name}</span>
+                        <span class="truncate flex-1" title="${f.name}">${f.name.split('/').pop()}</span>
                     </div>
                     <div class="flex items-center space-x-1.5 shrink-0 ml-2">
                         ${f.rating > 0 ? `<span class="text-yellow-400 text-xs font-bold">★${f.rating}</span>` : ''}
@@ -2335,7 +2336,7 @@
             const fileObj = filteredFiles[currentIndex];
             if (!fileObj || !fileObj.name) return; // 안전 검사
             
-            ui.fileName.textContent = fileObj.name; updateListSelection();
+            ui.fileName.textContent = fileObj.name.split('/').pop(); updateListSelection();
             
             if (!viewedFilesSet.has(fileObj.name)) { viewedFilesSet.add(fileObj.name); saveViewedProgress(); }
             updateDashboard();
@@ -3272,11 +3273,13 @@
             const savedTimeout = localStorage.getItem('photoCulling_screensaverTimeout');
             if (savedTimeout !== null) screensaverTimeoutSec = parseInt(savedTimeout, 10);
             
-            const selTimeout = document.getElementById('sel-screensaver-timeout');
-            if (selTimeout) {
-                selTimeout.value = screensaverTimeoutSec;
-                selTimeout.addEventListener('change', (e) => {
-                    screensaverTimeoutSec = parseInt(e.target.value, 10);
+            const inputTimeout = document.getElementById('input-screensaver-timeout');
+            if (inputTimeout) {
+                inputTimeout.value = screensaverTimeoutSec;
+                inputTimeout.addEventListener('input', (e) => {
+                    let val = parseInt(e.target.value, 10);
+                    if (isNaN(val) || val < 0) val = 0;
+                    screensaverTimeoutSec = val;
                     localStorage.setItem('photoCulling_screensaverTimeout', screensaverTimeoutSec);
                     saveSettingsToCloud();
                     resetIdleTimer();
