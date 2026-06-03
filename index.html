@@ -1066,8 +1066,7 @@
             else if (key === userShortcuts.loupe && !e.repeat) toggleLoupe(true);
             else if (key === userShortcuts.move) {
                 e.preventDefault(); 
-                if(isZipMode) showToast('ZIP 내 이미지는 셀렉(복사)할 수 없습니다.');
-                else if (destDirHandle && !ui.btnMove.disabled) moveSelectedFiles();
+                if (destDirHandle && !ui.btnMove.disabled) moveSelectedFiles();
                 else showToast('셀렉할 폴더를 먼저 선택해주세요.');
             }
         }
@@ -1480,7 +1479,7 @@
             filteredFiles.forEach((item, idx) => {
                 const li = document.createElement('li');
                 li.className = `p-3 rounded text-sm truncate ${idx === currentIndex ? 'bg-blue-600 text-white font-bold' : (viewedFilesSet.has(item.name) ? 'text-gray-400' : 'text-gray-200')} border-b border-gray-800 active:bg-gray-700`;
-                li.textContent = `${idx + 1}. ${item.name}`;
+                li.textContent = `${idx + 1}. ${item.name.split('/').pop()}`;
                 li.onclick = () => {
                     currentIndex = idx;
                     selectedIndices.clear(); selectedIndices.add(currentIndex); lastSelectedIndex = currentIndex;
@@ -1617,8 +1616,7 @@
                 if (!destDirHandle) {
                     openDestDirectory();
                 } else {
-                    if(isZipMode) showToast('ZIP 내 이미지는 셀렉(복사)할 수 없습니다.');
-                    else moveSelectedFiles();
+                    moveSelectedFiles();
                 }
             });
 
@@ -1803,7 +1801,7 @@
                             data.list.forEach(item => {
                                 const li = document.createElement('li');
                                 li.className = `p-3 rounded text-sm truncate ${item.idx === data.currentIndex ? 'bg-blue-600 text-white font-bold' : (item.viewed ? 'text-gray-400' : 'text-gray-200')} border-b border-gray-800 active:bg-gray-700`;
-                                li.textContent = `${item.idx + 1}. ${item.name}`;
+                                li.textContent = `${item.idx + 1}. ${item.name.split('/').pop()}`;
                                 li.onclick = () => {
                                     remoteConn.send({ action: 'jump', index: item.idx });
                                     document.getElementById('remote-list-overlay').classList.add('hidden');
@@ -1961,7 +1959,7 @@
                     ui.loadingIndicator.classList.remove('hidden'); ui.loadingIndicator.textContent = "확인 중...";
                     let matchCount = 0;
                     for (const f of allFiles) {
-                        try { await destDirHandle.getFileHandle(f.name); f.isCopied = true; matchCount++; } catch (e) {}
+                        try { await destDirHandle.getFileHandle(f.name.split('/').pop()); f.isCopied = true; matchCount++; } catch (e) {}
                     }
                     ui.loadingIndicator.classList.add('hidden'); ui.loadingIndicator.textContent = "읽는 중...";
                     if (matchCount > 0) { renderFileList(); showToast(`대상 폴더에 이미 ${matchCount}개의 사진이 존재합니다.`); }
@@ -2894,7 +2892,6 @@
 
         async function moveSelectedFiles() {
             if (!destDirHandle || filteredFiles.length === 0 || selectedIndices.size === 0) return;
-            if (isZipMode) { showToast('ZIP 모드에서는 셀렉(복사)할 수 없습니다.', true); return; }
             
             try {
                 if (await verifyPermission(destDirHandle, true) === false) { showToast('대상 폴더 권한이 필요합니다.', true); return; }
@@ -2905,12 +2902,13 @@
 
                 for (const idx of indicesToProcess) {
                     const fileObj = filteredFiles[idx];
-                    const baseName = fileObj.name.substring(0, fileObj.name.lastIndexOf('.'));
+                    const rawFileName = fileObj.name.split('/').pop();
+                    const baseName = rawFileName.substring(0, rawFileName.lastIndexOf('.'));
                     const xmpName = baseName + '.xmp';
                     
                     if (fileObj.isCopied) {
                         try {
-                            await destDirHandle.removeEntry(fileObj.name);
+                            await destDirHandle.removeEntry(rawFileName);
                             try { await destDirHandle.removeEntry(xmpName); } catch(e) {}
                             fileObj.isCopied = false;
                             const origIdx = allFiles.findIndex(f => f.name === fileObj.name);
@@ -2918,18 +2916,26 @@
                             removedCount++;
                         } catch (e) { console.error('삭제 실패', e); }
                     } else {
-                        const sourceFile = await fileObj.handle.getFile();
-                        const destFileHandle = await destDirHandle.getFileHandle(fileObj.name, { create: true });
+                        const destFileHandle = await destDirHandle.getFileHandle(rawFileName, { create: true });
                         const w = await destFileHandle.createWritable();
-                        await w.write(sourceFile); await w.close();
                         
-                        if (srcDirHandle) {
+                        if (fileObj.isZip) {
+                            const blobData = await fileObj.entry.async("blob");
+                            await w.write(blobData);
+                        } else {
+                            const sourceFile = await fileObj.handle.getFile();
+                            await w.write(sourceFile);
+                        }
+                        await w.close();
+                        
+                        if (!fileObj.isZip && srcDirHandle) {
                             try {
                                 const xmpFile = await (await srcDirHandle.getFileHandle(xmpName)).getFile();
                                 const xw = await (await destDirHandle.getFileHandle(xmpName, { create: true })).createWritable();
                                 await xw.write(xmpFile); await xw.close();
                             } catch(e) {}
                         }
+                        
                         fileObj.isCopied = true;
                         const origIdx = allFiles.findIndex(f => f.name === fileObj.name);
                         if (origIdx > -1) allFiles[origIdx].isCopied = true;
